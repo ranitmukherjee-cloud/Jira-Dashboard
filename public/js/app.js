@@ -377,6 +377,14 @@ function destroyCharts() {
   STATE.charts = [];
 }
 
+// Horizontal bar charts get a fixed pixel height regardless of category count,
+// which makes Chart.js auto-skip labels ("Module Interest" with 12 modules
+// only showed 6). Give the container's div height proportional to the
+// category count, and force every label to render.
+function hBarHeight(count) {
+  return Math.max(180, count * 34) + 'px';
+}
+
 function addChart(canvasId, type, labels, datasets, extraOptions = {}, onBarClick) {
   const el = document.getElementById(canvasId);
   if (!el) return;
@@ -386,6 +394,9 @@ function addChart(canvasId, type, labels, datasets, extraOptions = {}, onBarClic
     plugins: { legend: { display: false } },
     ...extraOptions,
   };
+  if (extraOptions.indexAxis === 'y') {
+    options.scales = { ...options.scales, y: { ...options.scales?.y, ticks: { autoSkip: false } } };
+  }
   if (onBarClick) {
     options.onClick = (evt, elements) => {
       if (!elements.length) return;
@@ -411,43 +422,51 @@ function renderOverview() {
 
   const wonCount = base.filter((i) => i.stageGroup === 'won').length;
   const activeCount = base.filter((i) => i.stageGroup === 'active').length;
-  const churnCount = base.filter((i) => i.stageGroup === 'churn').length;
   const coldCount = base.filter((i) => i.stageGroup === 'cold').length;
   const stuckCount = base.filter((i) => i.stageGroup === 'active' && daysSince(i.updated) >= 14).length;
   const totalMrr = base.filter((i) => !isMrrMissing(i.mrr)).reduce((s, i) => s + i.mrr, 0);
+
+  const pseCounts = {};
+  base.forEach((i) => (pseCounts[i.assignee] = (pseCounts[i.assignee] || 0) + 1));
+  const pseEntries = Object.entries(pseCounts).sort((a, b) => b[1] - a[1]);
+
+  const modCounts = {};
+  base.forEach((i) => (i.modules || []).forEach((m) => (modCounts[m] = (modCounts[m] || 0) + 1)));
+  const modEntries = Object.entries(modCounts).sort((a, b) => b[1] - a[1]);
 
   document.getElementById('app').innerHTML = `
     <div class="page">
       <div class="ph"><div class="pht">Overview</div><div class="phs">Live from Jira PSV board · Project Cards only · click a status block, KPI, or chart bar to drill in</div></div>
       <div class="krow">
-        <div class="kpi"><div class="kb"></div><div class="kl">Total Deals</div><div class="kv">${base.length}</div><div class="ks">Matching current filters</div></div>
-        <div class="kpi seg-kpi" data-segment="active" style="cursor:pointer"><div class="kb" style="background:var(--b)"></div><div class="kl">Active</div><div class="kv">${activeCount}</div><div class="ks">In pipeline</div></div>
-        <div class="kpi seg-kpi" data-segment="won" style="cursor:pointer"><div class="kb" style="background:var(--g)"></div><div class="kl">Won</div><div class="kv">${wonCount}</div><div class="ks">Closed / completed</div></div>
-        <div class="kpi seg-kpi" data-segment="cold" style="cursor:pointer"><div class="kb" style="background:var(--a)"></div><div class="kl">Cold / C3M</div><div class="kv">${coldCount}</div><div class="ks">Check in 3 months</div></div>
-        <div class="kpi seg-kpi" data-segment="churn" style="cursor:pointer"><div class="kb" style="background:var(--r)"></div><div class="kl">Churn</div><div class="kv">${churnCount}</div><div class="ks">Lost deals</div></div>
-        <div class="kpi seg-kpi" data-segment="stuck" style="cursor:pointer"><div class="kb" style="background:var(--a)"></div><div class="kl">Stuck 14d+</div><div class="kv">${stuckCount}</div><div class="ks">Active, not moved recently</div></div>
-        <div class="kpi"><div class="kb" style="background:var(--b)"></div><div class="kl">Total MRR</div><div class="kv" style="font-size:22px">${fmtUsd(totalMrr)}</div><div class="ks"><a href="#/mrr">View MRR tab →</a></div></div>
+        <div class="kpi kpi-tint"><div class="kb"></div><div class="kl">Total Deals</div><div class="kv">${base.length}</div><div class="ks">Matching current filters</div></div>
+        <div class="kpi kpi-tint seg-kpi" data-segment="active" style="--kc:var(--b)"><div class="kb" style="background:var(--b)"></div><div class="kl">Active</div><div class="kv">${activeCount}</div><div class="ks">In pipeline</div></div>
+        <div class="kpi kpi-tint seg-kpi" data-segment="won" style="--kc:var(--g)"><div class="kb" style="background:var(--g)"></div><div class="kl">Won</div><div class="kv">${wonCount}</div><div class="ks">Closed / completed</div></div>
+        <div class="kpi kpi-tint seg-kpi" data-segment="cold" style="--kc:var(--a)"><div class="kb" style="background:var(--a)"></div><div class="kl">Cold / C3M</div><div class="kv">${coldCount}</div><div class="ks">Check in 3 months</div></div>
+        <div class="kpi kpi-tint seg-kpi" data-segment="stuck" style="--kc:var(--a)"><div class="kb" style="background:var(--a)"></div><div class="kl">Stuck 14d+</div><div class="kv">${stuckCount}</div><div class="ks">Active, not moved recently</div></div>
+        <div class="kpi kpi-tint" style="--kc:var(--b)"><div class="kb" style="background:var(--b)"></div><div class="kl">Total MRR</div><div class="kv" style="font-size:22px">${fmtUsd(totalMrr)}</div><div class="ks"><a href="#/mrr">View MRR tab →</a></div></div>
       </div>
 
-      <div class="sh"><div class="sht">Deals by Status</div><div class="shl"></div></div>
-      <div class="sblocks" id="statusBlocks">
+      <div class="sh"><div class="sht">Deals by Status</div><div class="shl"></div><div class="shb">Scroll for more, like the Jira board</div></div>
+      <div class="board-strip" id="statusBlocks">
         ${statusEntries
           .map(([status, count]) => {
             const cat = base.find((i) => i.status === status)?.statusCategory;
             const color = CAT_COLOR[cat] || '#94A3B8';
             const pct = ((count / (base.length || 1)) * 100).toFixed(1);
-            return `<div class="sblock" style="--cat-color:${color}" data-status="${escapeAttr(status)}">
-              <div class="sb-name">${status}</div>
-              <div class="sb-count">${count}</div>
-              <div class="sb-pct">${pct}% of ${base.length}</div>
+            return `<div class="bcol" data-status="${escapeAttr(status)}">
+              <div class="bcol-head" style="background:${color}">${status}</div>
+              <div class="bcol-body">
+                <div class="bcol-count">${count}</div>
+                <div class="bcol-pct">${pct}% of ${base.length}</div>
+              </div>
             </div>`;
           })
           .join('')}
       </div>
 
       <div class="g2">
-        <div class="card"><div class="ct">PSE Workload</div><div class="cs">Cards per PSE (filtered) · click a bar</div><div style="height:240px"><canvas id="pseChart"></canvas></div></div>
-        <div class="card"><div class="ct">Module Interest</div><div class="cs">How often each module is requested · click a bar</div><div style="height:240px"><canvas id="modChart"></canvas></div></div>
+        <div class="card"><div class="ct">PSE Workload</div><div class="cs">Cards per PSE (filtered) · click a bar</div><div style="height:${hBarHeight(pseEntries.length)}"><canvas id="pseChart"></canvas></div></div>
+        <div class="card"><div class="ct">Module Interest</div><div class="cs">How often each module is requested · click a bar</div><div style="height:${hBarHeight(modEntries.length)}"><canvas id="modChart"></canvas></div></div>
       </div>
 
       ${STATE.history.length > 1 ? `
@@ -458,7 +477,7 @@ function renderOverview() {
       </div>` : ''}
     </div>`;
 
-  document.querySelectorAll('#statusBlocks .sblock').forEach((el) => {
+  document.querySelectorAll('#statusBlocks .bcol').forEach((el) => {
     el.addEventListener('click', () => navigate(`/status/${encodeURIComponent(el.dataset.status)}`));
   });
   document.querySelectorAll('.seg-kpi').forEach((el) => {
@@ -466,19 +485,12 @@ function renderOverview() {
   });
 
   destroyCharts();
-  const pseCounts = {};
-  base.forEach((i) => (pseCounts[i.assignee] = (pseCounts[i.assignee] || 0) + 1));
-  const pseEntries = Object.entries(pseCounts).sort((a, b) => b[1] - a[1]);
   addChart(
     'pseChart', 'bar', pseEntries.map((e) => e[0]),
     [{ label: 'Cards', data: pseEntries.map((e) => e[1]), backgroundColor: '#0054FC' }],
     { indexAxis: 'y' },
     (pse) => goToFilteredList(`PSE: ${pse}`, (i) => i.assignee === pse)
   );
-
-  const modCounts = {};
-  base.forEach((i) => (i.modules || []).forEach((m) => (modCounts[m] = (modCounts[m] || 0) + 1)));
-  const modEntries = Object.entries(modCounts).sort((a, b) => b[1] - a[1]);
   addChart(
     'modChart', 'bar', modEntries.map((e) => e[0]),
     [{ label: 'Cards', data: modEntries.map((e) => e[1]), backgroundColor: '#12B76A' }],
@@ -553,12 +565,11 @@ function renderStatusDrilldown(status) {
   });
 }
 
-// ---------- segment drilldown (Active/Won/Cold/Churn/Stuck KPI clicks) ----------
+// ---------- segment drilldown (Active/Won/Cold/Stuck KPI clicks) ----------
 const SEGMENT_META = {
   active: { title: 'Active Deals', desc: 'All in-pipeline statuses' },
   won: { title: 'Won Deals', desc: 'Completed / Closure-Contract Won' },
   cold: { title: 'Cold / Check in 3 Months', desc: '' },
-  churn: { title: 'Churned Deals', desc: '' },
   stuck: { title: 'Stuck Deals (14+ days idle)', desc: 'Active deals not updated recently' },
 };
 
@@ -1067,21 +1078,20 @@ function renderTeam() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Team Performance</div><div class="phs">Per-PSE win/churn rates, computed live from current statuses · click a bar</div></div>
+      <div class="ph"><div class="pht">Team Performance</div><div class="phs">Per-PSE win rates, computed live from current statuses · click a bar</div></div>
       <div class="krow">
         ${pseNames
           .map((p) => {
             const d = byPse[p];
             const winRate = d.total ? ((d.won / d.total) * 100).toFixed(1) : '0.0';
-            const churnRate = d.total ? ((d.churn / d.total) * 100).toFixed(1) : '0.0';
-            return `<div class="kpi"><div class="kb"></div><div class="kl">${p}</div><div class="kv" style="font-size:22px">${d.total}</div><div class="ks">Win ${winRate}% · Churn ${churnRate}%</div></div>`;
+            return `<div class="kpi"><div class="kb"></div><div class="kl">${p}</div><div class="kv" style="font-size:22px">${d.total}</div><div class="ks">Win rate ${winRate}%</div></div>`;
           })
           .join('')}
       </div>
 
       <div class="g2">
-        <div class="card"><div class="ct">Portfolio by Stage Group</div><div class="cs">Active / Won / Cold / Churn per PSE</div><div style="height:280px"><canvas id="pseStackChart"></canvas></div></div>
-        <div class="card"><div class="ct">Win Rate vs Churn Rate</div><div class="cs">% per PSE</div><div style="height:280px"><canvas id="rateChart"></canvas></div></div>
+        <div class="card"><div class="ct">Portfolio by Stage Group</div><div class="cs">Active / Won / Cold per PSE</div><div style="height:280px"><canvas id="pseStackChart"></canvas></div></div>
+        <div class="card"><div class="ct">Win Rate</div><div class="cs">% per PSE · click a bar</div><div style="height:${hBarHeight(pseNames.length)}"><canvas id="rateChart"></canvas></div></div>
       </div>
 
       <div class="tc">
@@ -1110,17 +1120,13 @@ function renderTeam() {
       { label: 'Active', data: pseNames.map((p) => byPse[p].active), backgroundColor: '#0054FC' },
       { label: 'Won', data: pseNames.map((p) => byPse[p].won), backgroundColor: '#12B76A' },
       { label: 'Cold', data: pseNames.map((p) => byPse[p].cold), backgroundColor: '#D97706' },
-      { label: 'Churn', data: pseNames.map((p) => byPse[p].churn), backgroundColor: '#DC2626' },
     ],
     { plugins: { legend: { display: true, position: 'bottom' } }, scales: { x: { stacked: true }, y: { stacked: true } } }
   );
   addChart(
     'rateChart', 'bar', pseNames,
-    [
-      { label: 'Win %', data: pseNames.map((p) => (byPse[p].total ? +((byPse[p].won / byPse[p].total) * 100).toFixed(1) : 0)), backgroundColor: '#12B76A' },
-      { label: 'Churn %', data: pseNames.map((p) => (byPse[p].total ? +((byPse[p].churn / byPse[p].total) * 100).toFixed(1) : 0)), backgroundColor: '#DC2626' },
-    ],
-    { plugins: { legend: { display: true, position: 'bottom' } } },
+    [{ label: 'Win %', data: pseNames.map((p) => (byPse[p].total ? +((byPse[p].won / byPse[p].total) * 100).toFixed(1) : 0)), backgroundColor: '#12B76A' }],
+    { indexAxis: 'y' },
     (pse) => goToFilteredList(`PSE: ${pse}`, (i) => i.assignee === pse)
   );
 }
