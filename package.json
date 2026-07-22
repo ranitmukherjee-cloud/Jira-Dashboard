@@ -1,0 +1,15 @@
+{
+  "name": "psv-jira-dashboard",
+  "version": "1.0.0",
+  "description": "Dynamic dashboard for GoComet's Product Solutions (PSV) Jira board",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "fetch-data": "node scripts/fetch-jira-data.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5"
+  }
+}

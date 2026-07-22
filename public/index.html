@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PSV Dashboard — Product Solutions</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="tl">
+    <span class="brand"><span class="go">GO</span>COMET</span>
+    <div class="tsep"></div>
+    <span class="tlbl">PSV Team Dashboard</span>
+  </div>
+  <div class="tr">
+    <span class="dlbl" id="lastRefreshed">Loading…</span>
+    <div class="lpill" id="liveIndicator"><span class="ldot"></span>Live</div>
+    <button class="refresh-btn" id="refreshBtn">Refresh now</button>
+  </div>
+</header>
+
+<nav class="nav">
+  <div class="nt active" data-route="overview">Overview</div>
+  <div class="nt" data-route="mrr">MRR</div>
+  <div class="nt" data-route="closing">Closing Soon</div>
+  <div class="nt" data-route="tat">TAT</div>
+  <div class="nt" data-route="team">Team Performance</div>
+  <div class="nt" data-route="activity">Activity Log</div>
+</nav>
+
+<main id="app">
+  <div class="loading">Loading dashboard…</div>
+</main>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
