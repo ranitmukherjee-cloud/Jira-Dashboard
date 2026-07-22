@@ -1259,8 +1259,12 @@ function taskVisibleOnDay(task, day) {
   return true;
 }
 
-function taskOverdue(task) {
-  return task.status !== 'Done' && !!task.dueDate && task.dueDate < istToday();
+// referenceDay defaults to real "today", but the tracker view always passes
+// STATE.trackerDay explicitly — so browsing forward to a future day via
+// "Next" immediately shows tasks due before THAT day as overdue, instead of
+// waiting for the real clock to catch up to whatever day you're looking at.
+function taskOverdue(task, referenceDay = istToday()) {
+  return task.status !== 'Done' && !!task.dueDate && task.dueDate < referenceDay;
 }
 
 const trackerSaveTimers = {};
@@ -1279,8 +1283,8 @@ async function renderTracker() {
   renderTrackerView();
 }
 
-function trackerRow(t) {
-  const overdue = taskOverdue(t);
+function trackerRow(t, day) {
+  const overdue = taskOverdue(t, day);
   return `
     <tr data-id="${t.id}" class="${overdue ? 'row-flagged' : ''}">
       <td class="tk-cell"><input class="tk-input" data-field="dealName" value="${escapeAttr(t.dealName || '')}" placeholder="Deal name…"/></td>
@@ -1313,7 +1317,7 @@ function renderTrackerView() {
   const isToday = day === istToday();
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
-  const overdueTotal = tasks.filter(taskOverdue).length;
+  const overdueTotal = tasks.filter((t) => taskOverdue(t, day)).length;
 
   const pseSections = TRACKER_PSE_ROWS.map((pse) => {
     const rows = tasks
@@ -1325,7 +1329,7 @@ function renderTrackerView() {
       <div class="tw">
         <table>
           <thead><tr><th style="width:26%">Deal Name</th><th>Status</th><th>Due Date</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:20%">Blocker</th><th></th></tr></thead>
-          <tbody>${rows.map(trackerRow).join('') || '<tr><td colspan="7" class="empty">No tasks yet</td></tr>'}</tbody>
+          <tbody>${rows.map((t) => trackerRow(t, day)).join('') || '<tr><td colspan="7" class="empty">No tasks yet</td></tr>'}</tbody>
         </table>
       </div>
       <div style="padding:10px 16px"><button class="tk-add" data-add-pse="${pse}">+ Add Task</button></div>
@@ -1334,7 +1338,7 @@ function renderTrackerView() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Daily Task Tracker</div><div class="phs">One sheet per PSE · in-progress tasks carry forward automatically until marked Done · red rows are overdue (${overdueTotal} today)</div></div>
+      <div class="ph"><div class="pht">Daily Task Tracker</div><div class="phs">One sheet per PSE · in-progress tasks carry forward automatically until marked Done · red rows are overdue as of this day (${overdueTotal})</div></div>
       <div class="tk-daynav">
         <button id="prevDayBtn">← Prev</button>
         <div class="tk-daydate">${dayLabel}${isToday ? ' (Today)' : ''}</div>
