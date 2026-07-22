@@ -35,7 +35,7 @@ async function refresh() {
     lastError = null;
     fs.mkdirSync(path.dirname(DATA_PATH), { recursive: true });
     fs.writeFileSync(DATA_PATH, JSON.stringify(cache, null, 2));
-    appendSnapshot(issues);
+    await appendSnapshot(issues);
     console.log(
       `[${cache.generatedAt}] Refreshed ${total} issues (${changelogFetches} changelog re-fetches)`
     );
@@ -52,7 +52,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/data', (req, res) => res.json(cache));
 
-app.get('/api/history', (req, res) => res.json(loadHistory()));
+app.get('/api/history', async (req, res) => res.json(await loadHistory()));
 
 app.get('/api/health', (req, res) =>
   res.json({ ok: !lastError, lastRefresh: cache.generatedAt, lastError, refreshing })

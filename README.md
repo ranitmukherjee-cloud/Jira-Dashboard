@@ -34,3 +34,26 @@ A Windows Scheduled Task **"PSV Dashboard Refresh"** is already registered — i
 ## Data model
 
 `lib/jira.js` is the single source of truth for talking to Jira: it fetches all PSV issues, reuses cached changelogs when an issue's `updated` timestamp hasn't changed (so refreshes stay cheap), and computes each card's TAT. Both `server.js` (live polling) and `scripts/fetch-jira-data.js` (one-shot) use it.
+
+## Deploying to Vercel
+
+Vercel runs serverless functions, not a long-lived process — so the 5-minute background poller and local JSON file storage from the self-hosted setup above don't carry over as-is. The `/api` folder and `vercel.json` in this repo adapt the same `lib/jira.js` logic to that model:
+
+- **`api/data.js`, `api/history.js`** — read the current cached data (GET), used by the frontend exactly like the self-hosted server's `/api/data` and `/api/history`.
+- **`api/refresh.js`** — on-demand full refresh (POST), wired to the dashboard's "Refresh now" button.
+- **`api/cron/refresh.js`** — the same refresh, triggered automatically once a day by Vercel Cron (`vercel.json` schedules it for `30 1 * * *` UTC = 7:00 AM IST).
+- **`lib/store.js`** — swaps the storage backend: local JSON files here (unchanged), Upstash Redis on Vercel (required there, since the serverless filesystem doesn't persist between requests).
+
+**Important trade-off:** Vercel Cron on the Hobby plan only runs jobs once a day. That gives you the daily 7 AM refresh, but not the 5-minute "live" feel from the self-hosted setup — data updates whenever someone clicks "Refresh now," or once a day automatically. Vercel Pro allows more frequent cron schedules if closer-to-live matters enough to upgrade.
+
+### One-time setup in the Vercel dashboard
+
+1. **Storage → Create Database → Redis** (Upstash, via Vercel Marketplace) and connect it to this project. This injects `KV_REST_API_URL` / `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`, both are handled) as environment variables automatically.
+2. **Settings → Environment Variables** — add for Production (and Preview, if you want preview deploys to work too):
+   - `JIRA_DOMAIN` = `gocomet.atlassian.net`
+   - `JIRA_EMAIL` = your Jira email
+   - `JIRA_API_TOKEN` = your Jira API token
+   - `JIRA_PROJECT_KEY` = `PSV`
+   - `CRON_SECRET` = any random string (protects `/api/cron/refresh` from being called by anyone who finds the URL)
+3. **Push this repo to GitHub** (`git push -u origin main`) and connect it in the Vercel project if not already linked — that resolves the "No Production Deployment" state, since Vercel builds from `main` on push.
+4. After the first deploy, trigger one manual refresh (call `POST /api/refresh`, or use the dashboard's "Refresh now" button) so real data is in Redis before the next scheduled cron run.

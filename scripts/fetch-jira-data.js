@@ -28,7 +28,7 @@ const OUT_PATH = path.join(__dirname, '..', 'public', 'data', 'psv-data.json');
   );
   console.log(`Wrote ${issues.length} issues to ${OUT_PATH}`);
 
-  appendSnapshot(issues);
+  await appendSnapshot(issues);
   console.log('Appended daily history snapshot.');
 })().catch((err) => {
   console.error(err);
