@@ -5,10 +5,12 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { getLiveData } = require('./lib/live');
+const { listTasks, createTask, updateTask, deleteTask } = require('./lib/tracker');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/data', async (req, res) => {
@@ -33,6 +35,32 @@ app.post('/api/refresh', async (req, res) => {
 });
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+// Daily Task Tracker — manually entered, shared, persistent (not from Jira).
+app.get('/api/tracker', async (req, res) => {
+  res.json(await listTasks());
+});
+app.post('/api/tracker', async (req, res) => {
+  try {
+    res.status(201).json(await createTask(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.put('/api/tracker/:id', async (req, res) => {
+  try {
+    res.json(await updateTask(req.params.id, req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete('/api/tracker/:id', async (req, res) => {
+  try {
+    res.json(await deleteTask(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`PSV dashboard running at http://localhost:${PORT}`);

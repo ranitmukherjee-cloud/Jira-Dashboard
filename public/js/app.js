@@ -1,5 +1,6 @@
 // PSV Dashboard — vanilla JS SPA. All data comes live from /api/data (backed by Jira).
 const QUARTER_START = '2026-05-01';
+const TRACKER_PSE_ROWS = ['Ankith', 'Avani', 'Dhananjay', 'Karan', 'Surabhi', 'Utkarsh'];
 
 const STATE = {
   data: { generatedAt: null, count: 0, issues: [] },
@@ -1171,13 +1172,186 @@ function describeActivity(h) {
   return `<b>${h.field}</b> updated${h.to ? ` to <b>${h.to}</b>` : ''}`;
 }
 
-// ---------- Daily Tracker tab (placeholder — built separately, needs its own storage) ----------
-function renderTracker() {
+// ---------- Daily Task Tracker tab (manually entered, own persistent storage) ----------
+function istToday() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+}
+
+// Pure calendar-date arithmetic in UTC, so it's immune to the browser's local timezone/DST.
+function addDays(dateStr, delta) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
+
+// Mirrors lib/tracker.js: still-open tasks carry forward to every day from
+// creation onward; a Done task only shows on the day it was completed.
+function taskVisibleOnDay(task, day) {
+  if (task.createdDate > day) return false;
+  if (task.status === 'Done') return task.completedDate === day;
+  return true;
+}
+
+function taskOverdue(task) {
+  return task.status !== 'Done' && !!task.dueDate && task.dueDate < istToday();
+}
+
+const trackerSaveTimers = {};
+
+async function renderTracker() {
+  document.getElementById('app').innerHTML = '<div class="page"><div class="loading">Loading tracker…</div></div>';
+  if (!STATE.trackerDay) STATE.trackerDay = istToday();
+  try {
+    const res = await fetch('/api/tracker', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    STATE.trackerTasks = await res.json();
+  } catch (err) {
+    document.getElementById('app').innerHTML = `<div class="page"><div class="empty">Could not load the task tracker: ${err.message}</div></div>`;
+    return;
+  }
+  renderTrackerView();
+}
+
+function trackerRow(t) {
+  const overdue = taskOverdue(t);
+  return `
+    <tr data-id="${t.id}" class="${overdue ? 'row-flagged' : ''}">
+      <td class="tk-cell"><input class="tk-input" data-field="dealName" value="${escapeAttr(t.dealName || '')}" placeholder="Deal name…"/></td>
+      <td class="tk-cell">
+        <select class="tk-select" data-field="status">
+          ${['Open', 'In Progress', 'Done'].map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td class="tk-cell"><input class="tk-input" type="date" data-field="dueDate" value="${t.dueDate || ''}"/></td>
+      <td class="tk-cell">
+        <select class="tk-select" data-field="flagApoorv">
+          <option value="false" ${!t.flagApoorv ? 'selected' : ''}>No</option>
+          <option value="true" ${t.flagApoorv ? 'selected' : ''}>Yes</option>
+        </select>
+      </td>
+      <td class="tk-cell">
+        <select class="tk-select" data-field="helpInSow">
+          <option value="false" ${!t.helpInSow ? 'selected' : ''}>No</option>
+          <option value="true" ${t.helpInSow ? 'selected' : ''}>Yes</option>
+        </select>
+      </td>
+      <td class="tk-cell"><input class="tk-input" data-field="blocker" value="${escapeAttr(t.blocker || '')}" placeholder="Remarks…"/></td>
+      <td class="tk-cell"><button class="tk-del" data-del-id="${t.id}" title="Delete task">✕</button></td>
+    </tr>`;
+}
+
+function renderTrackerView() {
+  const day = STATE.trackerDay;
+  const tasks = STATE.trackerTasks || [];
+  const isToday = day === istToday();
+  const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+
+  const overdueTotal = tasks.filter(taskOverdue).length;
+
+  const pseSections = TRACKER_PSE_ROWS.map((pse) => {
+    const rows = tasks
+      .filter((t) => t.pse === pse && taskVisibleOnDay(t, day))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return `
+    <div class="tc">
+      <div class="th"><span class="tht">${pse}</span><span class="ths">${rows.length} task(s)</span></div>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:26%">Deal Name</th><th>Status</th><th>Due Date</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:20%">Blocker</th><th></th></tr></thead>
+          <tbody>${rows.map(trackerRow).join('') || '<tr><td colspan="7" class="empty">No tasks yet</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div style="padding:10px 16px"><button class="tk-add" data-add-pse="${pse}">+ Add Task</button></div>
+    </div>`;
+  }).join('');
+
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Daily Task Tracker</div><div class="phs">Coming soon</div></div>
-      <div class="empty">The Daily Task Tracker is being built as a separate feature (it needs its own shared, persistent storage since it's manually entered, not sourced from Jira).</div>
+      <div class="ph"><div class="pht">Daily Task Tracker</div><div class="phs">One sheet per PSE · in-progress tasks carry forward automatically until marked Done · red rows are overdue (${overdueTotal} today)</div></div>
+      <div class="tk-daynav">
+        <button id="prevDayBtn">← Prev</button>
+        <div class="tk-daydate">${dayLabel}${isToday ? ' (Today)' : ''}</div>
+        <button id="nextDayBtn">Next →</button>
+        ${!isToday ? '<button id="todayBtn">Jump to Today</button>' : ''}
+      </div>
+      ${pseSections}
     </div>`;
+
+  bindTrackerEvents();
+}
+
+function bindTrackerEvents() {
+  document.getElementById('prevDayBtn').addEventListener('click', () => {
+    STATE.trackerDay = addDays(STATE.trackerDay, -1);
+    renderTrackerView();
+  });
+  document.getElementById('nextDayBtn').addEventListener('click', () => {
+    STATE.trackerDay = addDays(STATE.trackerDay, 1);
+    renderTrackerView();
+  });
+  const todayBtn = document.getElementById('todayBtn');
+  if (todayBtn) todayBtn.addEventListener('click', () => {
+    STATE.trackerDay = istToday();
+    renderTrackerView();
+  });
+
+  document.querySelectorAll('[data-add-pse]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const pse = btn.dataset.addPse;
+      const res = await fetch('/api/tracker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pse }) });
+      const task = await res.json();
+      STATE.trackerTasks.push(task);
+      renderTrackerView();
+    });
+  });
+
+  document.querySelectorAll('.tk-del').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.delId;
+      if (!confirm('Delete this task?')) return;
+      await fetch(`/api/tracker/${id}`, { method: 'DELETE' });
+      STATE.trackerTasks = STATE.trackerTasks.filter((t) => t.id !== id);
+      renderTrackerView();
+    });
+  });
+
+  document.querySelectorAll('.tk-input[data-field], .tk-select[data-field]').forEach((el) => {
+    const row = el.closest('tr');
+    const id = row.dataset.id;
+    const field = el.dataset.field;
+    const immediate = el.tagName === 'SELECT' || el.type === 'date';
+    el.addEventListener(immediate ? 'change' : 'input', () => {
+      let value = el.value;
+      if (field === 'flagApoorv' || field === 'helpInSow') value = value === 'true';
+      saveTrackerField(id, field, value, immediate);
+    });
+  });
+}
+
+async function saveTrackerField(id, field, value, rerenderAfterSave) {
+  const task = STATE.trackerTasks.find((t) => t.id === id);
+  if (task) task[field] = value; // optimistic local update, so the UI never feels laggy
+
+  clearTimeout(trackerSaveTimers[id + field]);
+  const doSave = async () => {
+    try {
+      const res = await fetch(`/api/tracker/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      });
+      const updated = await res.json();
+      const idx = STATE.trackerTasks.findIndex((t) => t.id === id);
+      if (idx !== -1) STATE.trackerTasks[idx] = updated;
+      if (rerenderAfterSave) renderTrackerView();
+    } catch (err) {
+      console.error('Tracker save failed', err);
+    }
+  };
+
+  if (rerenderAfterSave) await doSave();
+  else trackerSaveTimers[id + field] = setTimeout(doSave, 500);
 }
 
 // ---------- card modal ----------
