@@ -241,9 +241,21 @@ function goToFilteredList(title, predicate) {
 }
 
 // ---------- sidebar (all filters live here, persistent across every tab) ----------
-function sidebarCheckboxGroup(id, label, options, selected) {
-  if (!options.length) return '';
-  const opts = options
+const FACC_GROUPS = ['pse', 'status', 'kam', 'salesRep', 'modules', 'requestCategory'];
+const FACC_DEFAULT_OPEN = { pse: true, status: true, kam: false, salesRep: false, modules: false, requestCategory: false };
+
+function loadSidebarPrefs() {
+  STATE.sidebarCollapsed = localStorage.getItem('psv_sidebar_collapsed') === '1';
+  STATE.facc = {};
+  FACC_GROUPS.forEach((g) => {
+    const stored = localStorage.getItem('psv_facc_' + g);
+    STATE.facc[g] = stored === null ? FACC_DEFAULT_OPEN[g] : stored === '1';
+  });
+}
+
+function checkboxListHtml(id, options, selected) {
+  if (!options.length) return '<div class="empty" style="padding:8px;font-size:11px;">No data</div>';
+  return `<div class="sf-opts">${options
     .map(
       (o) => `
       <label class="sf-opt">
@@ -251,62 +263,97 @@ function sidebarCheckboxGroup(id, label, options, selected) {
         <span>${o}</span>
       </label>`
     )
-    .join('');
-  return `<div class="sfgroup"><label>${label} ${selected.size ? `(${selected.size})` : ''}</label><div class="sf-opts">${opts}</div></div>`;
+    .join('')}</div>`;
+}
+
+function faccGroup(id, label, bodyHtml, badgeCount) {
+  const open = STATE.facc[id];
+  return `
+    <div class="facc ${open ? 'open' : ''}" data-facc="${id}">
+      <div class="facc-head" data-facc-toggle="${id}">
+        <span class="facc-head-label">${label}${badgeCount ? `<span class="facc-badge">${badgeCount}</span>` : ''}</span>
+        <span class="facc-chev">▸</span>
+      </div>
+      <div class="facc-body"><div class="facc-body-inner">${bodyHtml}</div></div>
+    </div>`;
 }
 
 function renderSidebar() {
+  if (!STATE.facc) loadSidebarPrefs();
   const f = STATE.filters;
   const sb = document.getElementById('sidebar');
+  const activeCount =
+    f.pse.size + f.status.size + f.kam.size + f.salesRep.size + f.modules.size + f.requestCategory.size +
+    (f.tat ? 1 : 0) + (f.dealSize ? 1 : 0) + (f.startFrom ? 1 : 0) + (f.startTo ? 1 : 0) +
+    (f.currentQuarterOnly ? 1 : 0) + (f.search.trim() ? 1 : 0);
+
+  sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
   sb.innerHTML = `
-    <div class="sb-title">Filters</div>
-    <div class="sfgroup">
-      <label>Search</label>
-      <input class="fi" id="searchInput" type="text" placeholder="Client, PSV key, KAM, Sales Rep…" value="${escapeAttr(f.search)}"/>
+    <div class="sb-header">
+      <div class="sb-title">Filters${activeCount ? `<span class="facc-badge">${activeCount}</span>` : ''}</div>
+      <button class="sb-toggle" id="sidebarToggleBtn" title="${STATE.sidebarCollapsed ? 'Expand filters' : 'Collapse filters'}">${STATE.sidebarCollapsed ? '»' : '«'}</button>
     </div>
-    ${sidebarCheckboxGroup('pse', 'PSE', STATE.options.pse, f.pse)}
-    ${sidebarCheckboxGroup('status', 'Status', STATE.options.status, f.status)}
-    ${sidebarCheckboxGroup('kam', 'KAM', STATE.options.kam, f.kam)}
-    ${sidebarCheckboxGroup('salesRep', 'Sales Representative', STATE.options.salesRep, f.salesRep)}
-    ${sidebarCheckboxGroup('modules', 'List of Modules', STATE.options.modules, f.modules)}
-    ${sidebarCheckboxGroup('requestCategory', 'Request Category', STATE.options.requestCategory, f.requestCategory)}
-    <div class="sfgroup">
-      <label>TAT</label>
-      <select class="fs" id="tatSelect">
-        <option value="">All</option>
-        <option value="not_started" ${f.tat === 'not_started' ? 'selected' : ''}>Not started</option>
-        <option value="in_progress" ${f.tat === 'in_progress' ? 'selected' : ''}>In progress</option>
-        <option value="completed" ${f.tat === 'completed' ? 'selected' : ''}>Completed</option>
-        <option value="0-7" ${f.tat === '0-7' ? 'selected' : ''}>0–7 days</option>
-        <option value="8-15" ${f.tat === '8-15' ? 'selected' : ''}>8–15 days</option>
-        <option value="16-30" ${f.tat === '16-30' ? 'selected' : ''}>16–30 days</option>
-        <option value="31+" ${f.tat === '31+' ? 'selected' : ''}>31+ days</option>
-      </select>
-    </div>
-    <div class="sfgroup">
-      <label>Deal Size (ARR = MRR × 12)</label>
-      <select class="fs" id="dealSizeSelect">
-        <option value="">All</option>
-        <option value="large" ${f.dealSize === 'large' ? 'selected' : ''}>Large deals (&gt;$100k ARR)</option>
-        <option value="small" ${f.dealSize === 'small' ? 'selected' : ''}>Small deals (&le;$100k ARR)</option>
-      </select>
-    </div>
-    <div class="sfgroup">
-      <label>Solutioning Start Date</label>
-      <div class="sf-daterow">
-        <input type="date" class="fi" id="startFromInput" value="${f.startFrom}"/>
-        <input type="date" class="fi" id="startToInput" value="${f.startTo}"/>
+    <div class="sb-content" id="sidebarContent" style="display:${STATE.sidebarCollapsed ? 'none' : ''}">
+      <div class="search-wrap">
+        <span class="search-icon">⌕</span>
+        <input class="fi search-input" id="searchInput" type="text" placeholder="Search client, PSV key, KAM…" value="${escapeAttr(f.search)}"/>
       </div>
+
+      <div class="sfgroup-row">
+        <div class="sfgroup-half">
+          <label>TAT</label>
+          <select class="fs" id="tatSelect">
+            <option value="">All</option>
+            <option value="not_started" ${f.tat === 'not_started' ? 'selected' : ''}>Not started</option>
+            <option value="in_progress" ${f.tat === 'in_progress' ? 'selected' : ''}>In progress</option>
+            <option value="completed" ${f.tat === 'completed' ? 'selected' : ''}>Completed</option>
+            <option value="0-7" ${f.tat === '0-7' ? 'selected' : ''}>0–7 days</option>
+            <option value="8-15" ${f.tat === '8-15' ? 'selected' : ''}>8–15 days</option>
+            <option value="16-30" ${f.tat === '16-30' ? 'selected' : ''}>16–30 days</option>
+            <option value="31+" ${f.tat === '31+' ? 'selected' : ''}>31+ days</option>
+          </select>
+        </div>
+        <div class="sfgroup-half">
+          <label>Deal Size</label>
+          <select class="fs" id="dealSizeSelect">
+            <option value="">All</option>
+            <option value="large" ${f.dealSize === 'large' ? 'selected' : ''}>Large (&gt;$100k ARR)</option>
+            <option value="small" ${f.dealSize === 'small' ? 'selected' : ''}>Small (&le;$100k ARR)</option>
+          </select>
+        </div>
+      </div>
+
+      ${faccGroup('pse', 'PSE', checkboxListHtml('pse', STATE.options.pse, f.pse), f.pse.size)}
+      ${faccGroup('status', 'Status', checkboxListHtml('status', STATE.options.status, f.status), f.status.size)}
+      ${faccGroup('kam', 'KAM', checkboxListHtml('kam', STATE.options.kam, f.kam), f.kam.size)}
+      ${faccGroup('salesRep', 'Sales Representative', checkboxListHtml('salesRep', STATE.options.salesRep, f.salesRep), f.salesRep.size)}
+      ${faccGroup('modules', 'List of Modules', checkboxListHtml('modules', STATE.options.modules, f.modules), f.modules.size)}
+      ${faccGroup('requestCategory', 'Request Category', checkboxListHtml('requestCategory', STATE.options.requestCategory, f.requestCategory), f.requestCategory.size)}
+
+      <div class="sfgroup">
+        <label>Solutioning Start Date</label>
+        <div class="sf-daterow">
+          <input type="date" class="fi" id="startFromInput" value="${f.startFrom}"/>
+          <input type="date" class="fi" id="startToInput" value="${f.startTo}"/>
+        </div>
+        <label class="sf-toggle"><input type="checkbox" id="quarterToggle" ${f.currentQuarterOnly ? 'checked' : ''}/> Current quarter only (from 1 May 2026)</label>
+      </div>
+
+      <button class="clear-btn-full" id="clearFiltersBtn">Clear all filters</button>
     </div>
-    <div class="sfgroup">
-      <label class="sf-toggle"><input type="checkbox" id="quarterToggle" ${f.currentQuarterOnly ? 'checked' : ''}/> Current quarter only (from 1 May 2026)</label>
-    </div>
-    <button class="clear-btn-full" id="clearFiltersBtn">Clear all filters</button>
   `;
   bindSidebarEvents();
 }
 
 function bindSidebarEvents() {
+  document.getElementById('sidebarToggleBtn').addEventListener('click', () => {
+    STATE.sidebarCollapsed = !STATE.sidebarCollapsed;
+    localStorage.setItem('psv_sidebar_collapsed', STATE.sidebarCollapsed ? '1' : '0');
+    renderSidebar();
+  });
+
+  if (STATE.sidebarCollapsed) return; // nothing else is visible/interactive while collapsed
+
   const searchInput = document.getElementById('searchInput');
   searchInput.addEventListener('input', () => {
     STATE.filters.search = searchInput.value;
@@ -338,6 +385,15 @@ function bindSidebarEvents() {
     render();
   });
 
+  document.querySelectorAll('[data-facc-toggle]').forEach((head) => {
+    head.addEventListener('click', () => {
+      const id = head.dataset.faccToggle;
+      STATE.facc[id] = !STATE.facc[id];
+      localStorage.setItem('psv_facc_' + id, STATE.facc[id] ? '1' : '0');
+      head.closest('.facc').classList.toggle('open', STATE.facc[id]);
+    });
+  });
+
   document.querySelectorAll('#sidebar [data-mgroup]').forEach((cb) => {
     cb.addEventListener('change', () => {
       const group = cb.dataset.mgroup;
@@ -345,8 +401,9 @@ function bindSidebarEvents() {
       if (cb.checked) set.add(cb.value);
       else set.delete(cb.value);
       render();
-      // Re-render the sidebar so the "(N selected)" counts stay accurate,
-      // without stealing focus from whatever the user just clicked.
+      // Re-render the sidebar so the "N selected" badges stay accurate.
+      // STATE.facc already holds each accordion's open/closed state, so
+      // faccGroup() re-applies it correctly rather than resetting anything.
       renderSidebar();
     });
   });
