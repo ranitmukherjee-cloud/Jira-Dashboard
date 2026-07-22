@@ -6,6 +6,7 @@ const express = require('express');
 const path = require('path');
 const { getLiveData } = require('./lib/live');
 const { listTasks, createTask, updateTask, deleteTask } = require('./lib/tracker');
+const { USE_REDIS, initError } = require('./lib/trackerStore');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +38,17 @@ app.post('/api/refresh', async (req, res) => {
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // Daily Task Tracker — manually entered, shared, persistent (not from Jira).
+app.get('/api/tracker/debug', (req, res) => {
+  const err = initError();
+  res.json({
+    hasKvUrl: !!process.env.KV_REST_API_URL,
+    hasKvToken: !!process.env.KV_REST_API_TOKEN,
+    hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+    hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+    useRedis: USE_REDIS,
+    initError: err ? err.message : null,
+  });
+});
 app.get('/api/tracker', async (req, res) => {
   res.json(await listTasks());
 });
