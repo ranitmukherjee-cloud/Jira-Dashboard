@@ -32,7 +32,24 @@ body{background:var(--bg);color:var(--t1);font-family:'Inter',-apple-system,Blin
 .nt:hover{color:var(--b);background:var(--bl);}
 .nt.active{color:var(--b);border-bottom-color:var(--b);}
 
-.page{padding:22px 24px 48px;max-width:1500px;margin:0 auto;}
+/* LAYOUT: sidebar + content */
+.layout{display:flex;align-items:flex-start;}
+.sidebar{width:270px;flex-shrink:0;background:var(--w);border-right:1.5px solid var(--bdr);padding:16px 14px 40px;height:calc(100vh - 102px);overflow-y:auto;position:sticky;top:102px;}
+@media(max-width:900px){.layout{flex-direction:column;}.sidebar{width:100%;height:auto;position:static;border-right:none;border-bottom:1.5px solid var(--bdr);}}
+.sb-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--n);margin-bottom:12px;}
+.sfgroup{margin-bottom:16px;}
+.sfgroup > label{display:block;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--t3);margin-bottom:6px;}
+.sfgroup .fi,.sfgroup .fs{width:100%;}
+.sf-opts{max-height:150px;overflow-y:auto;border:1px solid var(--bdr);border-radius:8px;padding:4px;background:var(--bg);}
+.sf-opt{display:flex;align-items:center;gap:7px;padding:4px 6px;font-size:11.5px;border-radius:6px;cursor:pointer;}
+.sf-opt:hover{background:var(--bl);}
+.sf-daterow{display:flex;gap:6px;}
+.sf-daterow input{flex:1;min-width:0;font-size:11px;padding:5px 6px;}
+.sf-toggle{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--t2);cursor:pointer;padding:4px 0;}
+.clear-btn-full{width:100%;background:none;border:1.5px solid var(--bdr2);border-radius:8px;padding:8px;font-size:11.5px;font-weight:700;color:var(--t2);cursor:pointer;}
+.clear-btn-full:hover{border-color:var(--r);color:var(--r);}
+
+.page{padding:22px 24px 48px;max-width:1500px;margin:0 auto;flex:1;min-width:0;}
 .ph{margin-bottom:16px;display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;}
 .pht{font-size:18px;font-weight:800;color:var(--n);}
 .phs{font-size:11px;color:var(--t3);}
@@ -107,7 +124,13 @@ tbody tr:last-child td{border-bottom:none;}
 .ba{background:var(--ab);color:var(--a);}
 .br{background:var(--rb);color:var(--r);}
 .bgy{background:#F1F5F9;color:var(--t3);}
+.bpu{background:#F5F3FF;color:#7C3AED;}
 .mod-pill{display:inline-flex;background:var(--bl);color:var(--b);border:1px solid var(--b20);border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;margin:2px 2px 0 0;white-space:nowrap;}
+
+/* RED FLAG ROWS (pre-quarter holdovers, overdue tasks) */
+tr.row-flagged td{background:var(--rb) !important;}
+tr.row-flagged:hover td{background:#FEE2E2 !important;}
+.flag-badge{display:inline-flex;align-items:center;gap:4px;background:var(--r);color:#fff;border-radius:5px;padding:2px 7px;font-size:9.5px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;}
 
 /* MODAL */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(10,26,48,.55);z-index:400;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto;}

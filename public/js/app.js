@@ -1,10 +1,26 @@
 // PSV Dashboard — vanilla JS SPA. All data comes live from /api/data (backed by Jira).
+const QUARTER_START = '2026-05-01';
+
 const STATE = {
   data: { generatedAt: null, count: 0, issues: [] },
   history: [],
-  options: { pse: [], status: [], modules: [] },
-  filters: { pse: new Set(), status: new Set(), modules: new Set(), tat: '', search: '' },
+  options: { pse: [], status: [], modules: [], kam: [], salesRep: [], requestCategory: [] },
+  filters: {
+    search: '',
+    pse: new Set(),
+    status: new Set(),
+    modules: new Set(),
+    kam: new Set(),
+    salesRep: new Set(),
+    requestCategory: new Set(),
+    tat: '',
+    dealSize: '',
+    startFrom: '',
+    startTo: '',
+    currentQuarterOnly: false,
+  },
   route: { name: 'overview', param: null },
+  adhoc: null,
   charts: [],
 };
 
@@ -21,8 +37,12 @@ async function loadData() {
     pse: distinct(data.issues.map((i) => i.assignee)),
     status: distinct(data.issues.map((i) => i.status)),
     modules: distinct(data.issues.flatMap((i) => i.modules || [])),
+    kam: distinct(data.issues.map((i) => i.kam)),
+    salesRep: distinct(data.issues.map((i) => i.salesRep)),
+    requestCategory: distinct(data.issues.map((i) => i.requestCategory)),
   };
   updateHeader(data);
+  renderSidebar();
 
   try {
     const hRes = await fetch('/api/history', { cache: 'no-store' });
@@ -76,9 +96,16 @@ function applyFilters(issues, { skipStatus = false } = {}) {
     if (f.pse.size && !f.pse.has(i.assignee)) return false;
     if (!skipStatus && f.status.size && !f.status.has(i.status)) return false;
     if (f.modules.size && !(i.modules || []).some((m) => f.modules.has(m))) return false;
+    if (f.kam.size && !f.kam.has(i.kam)) return false;
+    if (f.salesRep.size && !f.salesRep.has(i.salesRep)) return false;
+    if (f.requestCategory.size && !f.requestCategory.has(i.requestCategory)) return false;
     if (!matchesTat(i, f.tat)) return false;
+    if (f.dealSize && i.dealSize !== f.dealSize) return false;
+    if (f.startFrom && (!i.solutioningStartDate || i.solutioningStartDate < f.startFrom)) return false;
+    if (f.startTo && (!i.solutioningStartDate || i.solutioningStartDate > f.startTo)) return false;
+    if (f.currentQuarterOnly && (!i.solutioningStartDate || i.solutioningStartDate < QUARTER_START)) return false;
     if (search) {
-      const hay = `${i.key} ${i.summary} ${i.assignee || ''} ${i.kam || ''}`.toLowerCase();
+      const hay = `${i.key} ${i.summary} ${i.assignee || ''} ${i.kam || ''} ${i.salesRep || ''}`.toLowerCase();
       if (!hay.includes(search)) return false;
     }
     return true;
@@ -91,7 +118,9 @@ function parseRoute() {
   const [name, param] = hash.split('/');
   if (name === 'status' && param) return { name: 'status', param: decodeURIComponent(param) };
   if (name === 'segment' && param) return { name: 'segment', param: decodeURIComponent(param) };
-  if (['activity', 'mrr', 'closing', 'tat', 'team'].includes(name)) return { name, param: null };
+  if (['activity', 'mrr', 'closing', 'tat', 'team', 'pipeline', 'c3m', 'tracker', 'list'].includes(name)) {
+    return { name, param: null };
+  }
   return { name: 'overview', param: null };
 }
 
@@ -104,7 +133,7 @@ window.addEventListener('hashchange', () => {
   render();
 });
 
-// ---------- rendering: shared bits ----------
+// ---------- shared render helpers ----------
 function fbadge(status) {
   const cat = STATE.data.issues.find((i) => i.status === status)?.statusCategory;
   const cls = cat === 'Done' ? 'bg' : cat === 'In Progress' ? 'bb' : 'bgy';
@@ -149,72 +178,229 @@ function modulePills(mods) {
   return mods.map((m) => `<span class="mod-pill">${m}</span>`).join('');
 }
 
-function multiSelect(id, label, options, selected) {
-  const summary = selected.size ? `${selected.size} selected` : `All`;
-  const opts = options
-    .map(
-      (o) => `
-      <label class="msel-opt">
-        <input type="checkbox" data-mgroup="${id}" value="${escapeAttr(o)}" ${selected.has(o) ? 'checked' : ''}/>
-        <span>${o}</span>
-      </label>`
-    )
-    .join('');
-  return `
-    <div class="fgroup msel">
-      <label>${label}</label>
-      <button type="button" class="msel-btn" data-mtoggle="${id}">${summary}</button>
-      <div class="msel-panel" id="panel-${id}">${opts || '<div class="empty" style="padding:10px">No options</div>'}</div>
-    </div>`;
+function dealSizeBadge(size) {
+  if (!size) return '—';
+  return size === 'large' ? '<span class="bd bpu">Large</span>' : '<span class="bd bgy">Small</span>';
 }
 
 function escapeAttr(s) {
   return String(s).replace(/"/g, '&quot;');
 }
 
-function filterBar({ includeStatus = true } = {}) {
-  const f = STATE.filters;
-  const chips = [];
-  f.pse.forEach((v) => chips.push({ group: 'pse', value: v, label: `PSE: ${v}` }));
-  if (includeStatus) f.status.forEach((v) => chips.push({ group: 'status', value: v, label: `Status: ${v}` }));
-  f.modules.forEach((v) => chips.push({ group: 'modules', value: v, label: `Module: ${v}` }));
-  if (f.tat) chips.push({ group: 'tat', value: f.tat, label: `TAT: ${tatBucketLabel(f.tat)}` });
-
-  return `
-    <div class="fbar">
-      <div class="fgroup">
-        <label>Search</label>
-        <input class="fi" id="searchInput" type="text" placeholder="Client, PSV key, KAM…" value="${escapeAttr(f.search)}"/>
-      </div>
-      ${multiSelect('pse', 'PSE', STATE.options.pse, f.pse)}
-      ${includeStatus ? multiSelect('status', 'Status', STATE.options.status, f.status) : ''}
-      ${multiSelect('modules', 'Modules', STATE.options.modules, f.modules)}
-      <div class="fgroup">
-        <label>TAT</label>
-        <select class="fs" id="tatSelect">
-          <option value="">All</option>
-          <option value="not_started" ${f.tat === 'not_started' ? 'selected' : ''}>Not started</option>
-          <option value="in_progress" ${f.tat === 'in_progress' ? 'selected' : ''}>In progress</option>
-          <option value="completed" ${f.tat === 'completed' ? 'selected' : ''}>Completed</option>
-          <option value="0-7" ${f.tat === '0-7' ? 'selected' : ''}>0–7 days</option>
-          <option value="8-15" ${f.tat === '8-15' ? 'selected' : ''}>8–15 days</option>
-          <option value="16-30" ${f.tat === '16-30' ? 'selected' : ''}>16–30 days</option>
-          <option value="31+" ${f.tat === '31+' ? 'selected' : ''}>31+ days</option>
-        </select>
-      </div>
-      <button class="clear-btn" id="clearFiltersBtn">Clear filters</button>
-      ${chips.length ? `<div class="fchips">${chips.map((c) => `<span class="fchip">${c.label}<span class="x" data-chip-group="${c.group}" data-chip-value="${escapeAttr(c.value)}">✕</span></span>`).join('')}</div>` : ''}
-    </div>`;
+function daysSince(dateStr) {
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
 }
 
-function tatBucketLabel(b) {
-  return { not_started: 'Not started', in_progress: 'In progress', completed: 'Completed', '0-7': '0–7d', '8-15': '8–15d', '16-30': '16–30d', '31+': '31+d' }[b] || b;
+function daysUntil(dateStr) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(dateStr);
+  target.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+function fmtUsd(n) {
+  if (n == null) return '—';
+  return '$' + Math.round(n).toLocaleString('en-US');
+}
+
+function isMrrMissing(mrr) {
+  return mrr === null || mrr === 0 || mrr === 1;
+}
+
+function jiraLinkCell(issue) {
+  return `<a class="jira-link" href="${issue.url}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Open →</a>`;
+}
+
+// ---------- CSV export ----------
+function toCsv(rows, columns) {
+  const esc = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = columns.map((c) => esc(c.label)).join(',');
+  const body = rows.map((r) => columns.map((c) => esc(c.value(r))).join(',')).join('\n');
+  return header + '\n' + body;
+}
+
+function downloadCsv(filename, csvString) {
+  const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ---------- chart-click-through to a deal list ----------
+function goToFilteredList(title, predicate) {
+  STATE.adhoc = { title, predicate };
+  navigate('/list');
+}
+
+// ---------- sidebar (all filters live here, persistent across every tab) ----------
+function sidebarCheckboxGroup(id, label, options, selected) {
+  if (!options.length) return '';
+  const opts = options
+    .map(
+      (o) => `
+      <label class="sf-opt">
+        <input type="checkbox" data-mgroup="${id}" value="${escapeAttr(o)}" ${selected.has(o) ? 'checked' : ''}/>
+        <span>${o}</span>
+      </label>`
+    )
+    .join('');
+  return `<div class="sfgroup"><label>${label} ${selected.size ? `(${selected.size})` : ''}</label><div class="sf-opts">${opts}</div></div>`;
+}
+
+function renderSidebar() {
+  const f = STATE.filters;
+  const sb = document.getElementById('sidebar');
+  sb.innerHTML = `
+    <div class="sb-title">Filters</div>
+    <div class="sfgroup">
+      <label>Search</label>
+      <input class="fi" id="searchInput" type="text" placeholder="Client, PSV key, KAM, Sales Rep…" value="${escapeAttr(f.search)}"/>
+    </div>
+    ${sidebarCheckboxGroup('pse', 'PSE', STATE.options.pse, f.pse)}
+    ${sidebarCheckboxGroup('status', 'Status', STATE.options.status, f.status)}
+    ${sidebarCheckboxGroup('kam', 'KAM', STATE.options.kam, f.kam)}
+    ${sidebarCheckboxGroup('salesRep', 'Sales Representative', STATE.options.salesRep, f.salesRep)}
+    ${sidebarCheckboxGroup('modules', 'List of Modules', STATE.options.modules, f.modules)}
+    ${sidebarCheckboxGroup('requestCategory', 'Request Category', STATE.options.requestCategory, f.requestCategory)}
+    <div class="sfgroup">
+      <label>TAT</label>
+      <select class="fs" id="tatSelect">
+        <option value="">All</option>
+        <option value="not_started" ${f.tat === 'not_started' ? 'selected' : ''}>Not started</option>
+        <option value="in_progress" ${f.tat === 'in_progress' ? 'selected' : ''}>In progress</option>
+        <option value="completed" ${f.tat === 'completed' ? 'selected' : ''}>Completed</option>
+        <option value="0-7" ${f.tat === '0-7' ? 'selected' : ''}>0–7 days</option>
+        <option value="8-15" ${f.tat === '8-15' ? 'selected' : ''}>8–15 days</option>
+        <option value="16-30" ${f.tat === '16-30' ? 'selected' : ''}>16–30 days</option>
+        <option value="31+" ${f.tat === '31+' ? 'selected' : ''}>31+ days</option>
+      </select>
+    </div>
+    <div class="sfgroup">
+      <label>Deal Size (ARR = MRR × 12)</label>
+      <select class="fs" id="dealSizeSelect">
+        <option value="">All</option>
+        <option value="large" ${f.dealSize === 'large' ? 'selected' : ''}>Large deals (&gt;$100k ARR)</option>
+        <option value="small" ${f.dealSize === 'small' ? 'selected' : ''}>Small deals (&le;$100k ARR)</option>
+      </select>
+    </div>
+    <div class="sfgroup">
+      <label>Solutioning Start Date</label>
+      <div class="sf-daterow">
+        <input type="date" class="fi" id="startFromInput" value="${f.startFrom}"/>
+        <input type="date" class="fi" id="startToInput" value="${f.startTo}"/>
+      </div>
+    </div>
+    <div class="sfgroup">
+      <label class="sf-toggle"><input type="checkbox" id="quarterToggle" ${f.currentQuarterOnly ? 'checked' : ''}/> Current quarter only (from 1 May 2026)</label>
+    </div>
+    <button class="clear-btn-full" id="clearFiltersBtn">Clear all filters</button>
+  `;
+  bindSidebarEvents();
+}
+
+function bindSidebarEvents() {
+  const searchInput = document.getElementById('searchInput');
+  searchInput.addEventListener('input', () => {
+    STATE.filters.search = searchInput.value;
+    render();
+  });
+
+  document.getElementById('tatSelect').addEventListener('change', (e) => {
+    STATE.filters.tat = e.target.value;
+    render();
+  });
+
+  document.getElementById('dealSizeSelect').addEventListener('change', (e) => {
+    STATE.filters.dealSize = e.target.value;
+    render();
+  });
+
+  document.getElementById('startFromInput').addEventListener('change', (e) => {
+    STATE.filters.startFrom = e.target.value;
+    render();
+  });
+
+  document.getElementById('startToInput').addEventListener('change', (e) => {
+    STATE.filters.startTo = e.target.value;
+    render();
+  });
+
+  document.getElementById('quarterToggle').addEventListener('change', (e) => {
+    STATE.filters.currentQuarterOnly = e.target.checked;
+    render();
+  });
+
+  document.querySelectorAll('#sidebar [data-mgroup]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const group = cb.dataset.mgroup;
+      const set = STATE.filters[group];
+      if (cb.checked) set.add(cb.value);
+      else set.delete(cb.value);
+      render();
+      // Re-render the sidebar so the "(N selected)" counts stay accurate,
+      // without stealing focus from whatever the user just clicked.
+      renderSidebar();
+    });
+  });
+
+  document.getElementById('clearFiltersBtn').addEventListener('click', () => {
+    STATE.filters = {
+      search: '',
+      pse: new Set(),
+      status: new Set(),
+      modules: new Set(),
+      kam: new Set(),
+      salesRep: new Set(),
+      requestCategory: new Set(),
+      tat: '',
+      dealSize: '',
+      startFrom: '',
+      startTo: '',
+      currentQuarterOnly: false,
+    };
+    renderSidebar();
+    render();
+  });
+}
+
+// ---------- charts ----------
+function destroyCharts() {
+  STATE.charts.forEach((c) => c.destroy());
+  STATE.charts = [];
+}
+
+function addChart(canvasId, type, labels, datasets, extraOptions = {}, onBarClick) {
+  const el = document.getElementById(canvasId);
+  if (!el) return;
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    ...extraOptions,
+  };
+  if (onBarClick) {
+    options.onClick = (evt, elements) => {
+      if (!elements.length) return;
+      onBarClick(labels[elements[0].index], elements[0].datasetIndex);
+    };
+    options.onHover = (evt, elements) => {
+      evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+    };
+  }
+  const chart = new Chart(el, { type, data: { labels, datasets }, options });
+  STATE.charts.push(chart);
 }
 
 // ---------- overview ----------
 function renderOverview() {
   const base = applyFilters(STATE.data.issues, { skipStatus: true });
-  const filtered = applyFilters(STATE.data.issues);
 
   const statusCounts = {};
   base.forEach((i) => {
@@ -231,8 +417,7 @@ function renderOverview() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Overview</div><div class="phs">Live from Jira PSV board · click a status block or KPI to drill in</div></div>
-      ${filterBar()}
+      <div class="ph"><div class="pht">Overview</div><div class="phs">Live from Jira PSV board · Project Cards only · click a status block, KPI, or chart bar to drill in</div></div>
       <div class="krow">
         <div class="kpi"><div class="kb"></div><div class="kl">Total Deals</div><div class="kv">${base.length}</div><div class="ks">Matching current filters</div></div>
         <div class="kpi seg-kpi" data-segment="active" style="cursor:pointer"><div class="kb" style="background:var(--b)"></div><div class="kl">Active</div><div class="kv">${activeCount}</div><div class="ks">In pipeline</div></div>
@@ -260,8 +445,8 @@ function renderOverview() {
       </div>
 
       <div class="g2">
-        <div class="card"><div class="ct">PSE Workload</div><div class="cs">Cards per PSE (filtered)</div><div style="height:240px"><canvas id="pseChart"></canvas></div></div>
-        <div class="card"><div class="ct">Module Interest</div><div class="cs">How often each module is requested</div><div style="height:240px"><canvas id="modChart"></canvas></div></div>
+        <div class="card"><div class="ct">PSE Workload</div><div class="cs">Cards per PSE (filtered) · click a bar</div><div style="height:240px"><canvas id="pseChart"></canvas></div></div>
+        <div class="card"><div class="ct">Module Interest</div><div class="cs">How often each module is requested · click a bar</div><div style="height:240px"><canvas id="modChart"></canvas></div></div>
       </div>
 
       ${STATE.history.length > 1 ? `
@@ -272,7 +457,6 @@ function renderOverview() {
       </div>` : ''}
     </div>`;
 
-  bindFilterBarEvents(renderOverview);
   document.querySelectorAll('#statusBlocks .sblock').forEach((el) => {
     el.addEventListener('click', () => navigate(`/status/${encodeURIComponent(el.dataset.status)}`));
   });
@@ -282,69 +466,30 @@ function renderOverview() {
 
   destroyCharts();
   const pseCounts = {};
-  base.forEach((i) => {
-    const k = i.assignee || 'Unassigned';
-    pseCounts[k] = (pseCounts[k] || 0) + 1;
-  });
+  base.forEach((i) => (pseCounts[i.assignee] = (pseCounts[i.assignee] || 0) + 1));
   const pseEntries = Object.entries(pseCounts).sort((a, b) => b[1] - a[1]);
-  addChart('pseChart', 'bar', pseEntries.map((e) => e[0]), [{ label: 'Cards', data: pseEntries.map((e) => e[1]), backgroundColor: '#0054FC' }], { indexAxis: 'y' });
+  addChart(
+    'pseChart', 'bar', pseEntries.map((e) => e[0]),
+    [{ label: 'Cards', data: pseEntries.map((e) => e[1]), backgroundColor: '#0054FC' }],
+    { indexAxis: 'y' },
+    (pse) => goToFilteredList(`PSE: ${pse}`, (i) => i.assignee === pse)
+  );
 
   const modCounts = {};
   base.forEach((i) => (i.modules || []).forEach((m) => (modCounts[m] = (modCounts[m] || 0) + 1)));
   const modEntries = Object.entries(modCounts).sort((a, b) => b[1] - a[1]);
-  addChart('modChart', 'bar', modEntries.map((e) => e[0]), [{ label: 'Cards', data: modEntries.map((e) => e[1]), backgroundColor: '#12B76A' }], { indexAxis: 'y' });
+  addChart(
+    'modChart', 'bar', modEntries.map((e) => e[0]),
+    [{ label: 'Cards', data: modEntries.map((e) => e[1]), backgroundColor: '#12B76A' }],
+    { indexAxis: 'y' },
+    (mod) => goToFilteredList(`Module: ${mod}`, (i) => (i.modules || []).includes(mod))
+  );
 
   if (STATE.history.length > 1) {
     const labels = STATE.history.map((h) => h.date);
     addChart('trendCountChart', 'line', labels, [{ label: 'Total deals', data: STATE.history.map((h) => h.count), borderColor: '#0054FC', tension: 0.3, fill: false }]);
     addChart('trendMrrChart', 'line', labels, [{ label: 'Total MRR', data: STATE.history.map((h) => h.totalMrr), borderColor: '#12B76A', tension: 0.3, fill: false }]);
   }
-
-  void filtered; // filtered set reserved for future use (search/status combined view)
-}
-
-function daysSince(dateStr) {
-  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
-}
-
-function daysUntil(dateStr) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(dateStr);
-  target.setHours(0, 0, 0, 0);
-  return Math.round((target.getTime() - today.getTime()) / 86400000);
-}
-
-function fmtUsd(n) {
-  if (n == null) return '—';
-  return '$' + Math.round(n).toLocaleString('en-US');
-}
-
-function isMrrMissing(mrr) {
-  return mrr === null || mrr === 0 || mrr === 1;
-}
-
-const STAGE_LABEL = { active: 'Active', won: 'Won', churn: 'Churn', cold: 'Cold / C3M', rejected: 'Rejected' };
-
-// ---------- CSV export ----------
-function toCsv(rows, columns) {
-  const esc = (v) => {
-    const s = v == null ? '' : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const header = columns.map((c) => esc(c.label)).join(',');
-  const body = rows.map((r) => columns.map((c) => esc(c.value(r))).join(',')).join('\n');
-  return header + '\n' + body;
-}
-
-function downloadCsv(filename, csvString) {
-  const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
 // ---------- status drilldown ----------
@@ -359,30 +504,31 @@ function renderStatusDrilldown(status) {
           <div class="pht" style="margin-top:6px">${status}</div>
           <div class="phs">${rows.length} card(s) in this status · live from Jira</div>
         </div>
+        <button class="clear-btn" id="exportBtn">Export CSV</button>
       </div>
-      ${filterBar({ includeStatus: false })}
       <div class="tc">
         <div class="th"><span class="tht">Cards</span><span class="ths">Click a row for full detail</span></div>
         <div class="tw">
           <table>
-            <thead><tr><th>Key</th><th>Client / Card</th><th>PSE</th><th>KAM</th><th>Priority</th><th>Modules</th><th>TAT</th><th>Updated</th></tr></thead>
+            <thead><tr><th>Key</th><th>Client / Card</th><th>PSE</th><th>KAM</th><th>Sales Rep</th><th>Priority</th><th>Modules</th><th>TAT</th><th>Updated</th></tr></thead>
             <tbody>
               ${
                 rows
                   .map(
                     (i) => `
                 <tr data-key="${i.key}">
-                  <td class="cb" style="color:var(--b);font-weight:700">${i.key}</td>
+                  <td style="color:var(--b);font-weight:700">${i.key}</td>
                   <td>${i.summary || ''}</td>
-                  <td>${i.assignee || '—'}</td>
+                  <td>${i.assignee}</td>
                   <td>${i.kam || '—'}</td>
+                  <td>${i.salesRep || '—'}</td>
                   <td>${i.priority || '—'}</td>
                   <td>${modulePills(i.modules)}</td>
                   <td>${tatLabel(i)}</td>
                   <td>${new Date(i.updated).toLocaleDateString('en-IN')}</td>
                 </tr>`
                   )
-                  .join('') || '<tr><td colspan="8" class="empty">No cards match the current filters</td></tr>'
+                  .join('') || '<tr><td colspan="9" class="empty">No cards match the current filters</td></tr>'
               }
             </tbody>
           </table>
@@ -391,9 +537,18 @@ function renderStatusDrilldown(status) {
     </div>`;
 
   document.getElementById('backLink').addEventListener('click', () => navigate('/'));
-  bindFilterBarEvents(() => renderStatusDrilldown(status));
-  document.querySelectorAll('tbody tr[data-key]').forEach((tr) => {
-    tr.addEventListener('click', () => openCardModal(tr.dataset.key));
+  document.querySelectorAll('tbody tr[data-key]').forEach((tr) => tr.addEventListener('click', () => openCardModal(tr.dataset.key)));
+  document.getElementById('exportBtn').addEventListener('click', () => {
+    downloadCsv(`psv-status-${status}.csv`, toCsv(rows, [
+      { label: 'Key', value: (r) => r.key },
+      { label: 'Client', value: (r) => r.summary },
+      { label: 'PSE', value: (r) => r.assignee },
+      { label: 'KAM', value: (r) => r.kam },
+      { label: 'Sales Rep', value: (r) => r.salesRep },
+      { label: 'Priority', value: (r) => r.priority },
+      { label: 'TAT Days', value: (r) => r.tatDays },
+      { label: 'Updated', value: (r) => r.updated },
+    ]));
   });
 }
 
@@ -413,17 +568,43 @@ function renderSegment(segment) {
     ? rows.filter((i) => i.stageGroup === 'active' && daysSince(i.updated) >= 14)
     : rows.filter((i) => i.stageGroup === segment);
 
+  renderGenericDealTable({
+    title: meta.title,
+    subtitle: `${rows.length} card(s) · ${meta.desc}`,
+    rows,
+    backTo: '/',
+    csvName: `psv-${segment}.csv`,
+  });
+}
+
+// ---------- generic ad-hoc list (chart click-through target) ----------
+function renderAdhocList() {
+  const ad = STATE.adhoc;
+  if (!ad) {
+    document.getElementById('app').innerHTML = '<div class="page"><div class="empty">Nothing to show — go back and click a chart bar or status block.</div></div>';
+    return;
+  }
+  const rows = applyFilters(STATE.data.issues).filter(ad.predicate);
+  renderGenericDealTable({
+    title: ad.title,
+    subtitle: `${rows.length} card(s) matching this selection`,
+    rows,
+    backTo: '/',
+    csvName: 'psv-selection.csv',
+  });
+}
+
+function renderGenericDealTable({ title, subtitle, rows, backTo, csvName }) {
   document.getElementById('app').innerHTML = `
     <div class="page">
       <div class="ph">
         <div>
-          <div class="back-link" id="backLink">← Back to Overview</div>
-          <div class="pht" style="margin-top:6px">${meta.title}</div>
-          <div class="phs">${rows.length} card(s) · ${meta.desc}</div>
+          <div class="back-link" id="backLink">← Back</div>
+          <div class="pht" style="margin-top:6px">${title}</div>
+          <div class="phs">${subtitle}</div>
         </div>
         <button class="clear-btn" id="exportBtn">Export CSV</button>
       </div>
-      ${filterBar()}
       <div class="tc">
         <div class="th"><span class="tht">Cards</span><span class="ths">Click a row for full detail</span></div>
         <div class="tw">
@@ -438,7 +619,7 @@ function renderSegment(segment) {
                   <td style="color:var(--b);font-weight:700">${i.key}</td>
                   <td>${i.summary || ''}</td>
                   <td>${fbadge(i.status)}</td>
-                  <td>${i.assignee || '—'}</td>
+                  <td>${i.assignee}</td>
                   <td>${i.kam || '—'}</td>
                   <td>${fmtUsd(i.mrr)}</td>
                   <td>${tatLabel(i)}</td>
@@ -453,11 +634,10 @@ function renderSegment(segment) {
       </div>
     </div>`;
 
-  document.getElementById('backLink').addEventListener('click', () => navigate('/'));
-  bindFilterBarEvents(() => renderSegment(segment));
+  document.getElementById('backLink').addEventListener('click', () => navigate(backTo));
   document.querySelectorAll('tbody tr[data-key]').forEach((tr) => tr.addEventListener('click', () => openCardModal(tr.dataset.key)));
   document.getElementById('exportBtn').addEventListener('click', () => {
-    const csv = toCsv(rows, [
+    downloadCsv(csvName, toCsv(rows, [
       { label: 'Key', value: (r) => r.key },
       { label: 'Client', value: (r) => r.summary },
       { label: 'Status', value: (r) => r.status },
@@ -466,9 +646,126 @@ function renderSegment(segment) {
       { label: 'MRR', value: (r) => r.mrr },
       { label: 'TAT Days', value: (r) => r.tatDays },
       { label: 'Updated', value: (r) => r.updated },
-    ]);
-    downloadCsv(`psv-${segment}.csv`, csv);
+    ]));
   });
+}
+
+// ---------- Active Pipeline tab ----------
+function renderPipeline() {
+  const rows = applyFilters(STATE.data.issues).filter((i) => i.isActivePipeline);
+  const valid = rows.filter((i) => !isMrrMissing(i.mrr));
+  const totalMrr = valid.reduce((s, i) => s + i.mrr, 0);
+  const holdovers = rows.filter((i) => i.isPreQuarterHoldover);
+
+  const byPse = {};
+  rows.forEach((i) => {
+    if (!byPse[i.assignee]) byPse[i.assignee] = [];
+    byPse[i.assignee].push(i);
+  });
+  const pseNames = Object.keys(byPse).sort();
+  const mrrByPse = pseNames
+    .map((p) => [p, byPse[p].filter((i) => !isMrrMissing(i.mrr)).reduce((s, i) => s + i.mrr, 0)])
+    .sort((a, b) => b[1] - a[1]);
+
+  const dealRow = (i) => `
+    <tr data-key="${i.key}" class="${i.isPreQuarterHoldover ? 'row-flagged' : ''}">
+      <td style="color:var(--b);font-weight:700">${i.key}</td>
+      <td>${i.summary || ''}</td>
+      <td>${fbadge(i.status)}</td>
+      <td>${i.kam || '—'}</td>
+      <td>${i.salesRep || '—'}</td>
+      <td>${fmtUsd(i.mrr)}</td>
+      <td>${fmtUsd(i.arr)}</td>
+      <td>${dealSizeBadge(i.dealSize)}</td>
+      <td>${i.solutioningStartDate ? new Date(i.solutioningStartDate).toLocaleDateString('en-IN') : '—'}</td>
+      <td>${i.isPreQuarterHoldover ? '<span class="flag-badge">🔴 Red Flag</span>' : '—'}</td>
+      <td>${jiraLinkCell(i)}</td>
+    </tr>`;
+
+  document.getElementById('app').innerHTML = `
+    <div class="page">
+      <div class="ph"><div class="pht">Active Pipeline</div><div class="phs">Req. Gathering · Internal Sign-off ("Solution Design") · Pending On Client · Solutions Draft Shared · COMMERCIALS · Solutioning (Post closure) — not yet closed. Use "Current quarter only" in the sidebar to hide pre-quarter holdovers.</div></div>
+      <div class="krow">
+        <div class="kpi"><div class="kb"></div><div class="kl">Active Pipeline Deals</div><div class="kv">${rows.length}</div><div class="ks">Matching current filters</div></div>
+        <div class="kpi"><div class="kb" style="background:var(--g)"></div><div class="kl">Total MRR</div><div class="kv" style="font-size:22px">${fmtUsd(totalMrr)}</div><div class="ks">Across ${valid.length} deals with MRR set</div></div>
+        <div class="kpi"><div class="kb" style="background:var(--r)"></div><div class="kl">Pre-Quarter Red Flags</div><div class="kv">${holdovers.length}</div><div class="ks">Started before 1 May 2026, still open</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px"><div class="ct">Active Pipeline MRR by PSE</div><div class="cs">Click a bar to see that PSE's active pipeline deals</div><div style="height:240px"><canvas id="pipelinePseChart"></canvas></div></div>
+
+      <div class="sh"><div class="sht">Deals by PSE</div><div class="shl"></div><div class="shb">🔴 red rows = started before the current quarter</div></div>
+      ${
+        pseNames
+          .map((p) => {
+            const list = byPse[p].slice().sort((a, b) => (b.mrr || 0) - (a.mrr || 0));
+            const pseMrr = list.filter((i) => !isMrrMissing(i.mrr)).reduce((s, i) => s + i.mrr, 0);
+            return `
+        <div class="tc">
+          <div class="th"><span class="tht">${p}</span><span class="ths">${list.length} deal(s) · ${fmtUsd(pseMrr)} MRR</span></div>
+          <div class="tw">
+            <table>
+              <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>KAM</th><th>Sales Rep</th><th>MRR</th><th>ARR</th><th>Size</th><th>Sol. Start</th><th>Flag</th><th></th></tr></thead>
+              <tbody>${list.map(dealRow).join('')}</tbody>
+            </table>
+          </div>
+        </div>`;
+          })
+          .join('') || '<div class="empty">No active pipeline deals match the current filters</div>'
+      }
+    </div>`;
+
+  document.querySelectorAll('tbody tr[data-key]').forEach((tr) => tr.addEventListener('click', () => openCardModal(tr.dataset.key)));
+  destroyCharts();
+  addChart(
+    'pipelinePseChart', 'bar', mrrByPse.map((e) => e[0]),
+    [{ label: 'MRR (USD)', data: mrrByPse.map((e) => e[1]), backgroundColor: '#0054FC' }],
+    { indexAxis: 'y' },
+    (pse) => goToFilteredList(`Active Pipeline — ${pse}`, (i) => i.isActivePipeline && i.assignee === pse)
+  );
+}
+
+// ---------- Check-in-3-Months tab ----------
+function renderC3m() {
+  const rows = applyFilters(STATE.data.issues).filter((i) => i.status === 'Check in 3 Months');
+  const byPse = {};
+  rows.forEach((i) => {
+    if (!byPse[i.assignee]) byPse[i.assignee] = [];
+    byPse[i.assignee].push(i);
+  });
+  const pseNames = Object.keys(byPse).sort((a, b) => byPse[b].length - byPse[a].length);
+
+  const dealRow = (i) => `
+    <tr data-key="${i.key}">
+      <td style="color:var(--b);font-weight:700">${i.key}</td>
+      <td>${i.summary || ''}</td>
+      <td>${i.kam || '—'}</td>
+      <td>${i.salesRep || '—'}</td>
+      <td>${fmtUsd(i.mrr)}</td>
+      <td>${new Date(i.updated).toLocaleDateString('en-IN')}</td>
+      <td>${jiraLinkCell(i)}</td>
+    </tr>`;
+
+  document.getElementById('app').innerHTML = `
+    <div class="page">
+      <div class="ph"><div class="pht">Check-in-3-Months</div><div class="phs">${rows.length} deal(s) currently parked in "Check in 3 Months", grouped by PSE</div></div>
+      ${
+        pseNames
+          .map(
+            (p) => `
+        <div class="tc">
+          <div class="th"><span class="tht">${p}</span><span class="ths">${byPse[p].length} deal(s)</span></div>
+          <div class="tw">
+            <table>
+              <thead><tr><th>Key</th><th>Client</th><th>KAM</th><th>Sales Rep</th><th>MRR</th><th>Last Updated</th><th></th></tr></thead>
+              <tbody>${byPse[p].map(dealRow).join('')}</tbody>
+            </table>
+          </div>
+        </div>`
+          )
+          .join('') || '<div class="empty">No deals currently in Check in 3 Months</div>'
+      }
+    </div>`;
+  document.querySelectorAll('tbody tr[data-key]').forEach((tr) => tr.addEventListener('click', () => openCardModal(tr.dataset.key)));
 }
 
 // ---------- MRR tab ----------
@@ -477,30 +774,50 @@ function renderMrr() {
   const valid = rows.filter((i) => !isMrrMissing(i.mrr));
   const missing = rows.filter((i) => isMrrMissing(i.mrr));
   const totalMrr = valid.reduce((s, i) => s + i.mrr, 0);
+  const largeDeals = rows.filter((i) => i.dealSize === 'large').sort((a, b) => b.mrr - a.mrr);
+  const smallDeals = rows.filter((i) => i.dealSize === 'small').sort((a, b) => b.mrr - a.mrr);
 
   const byPse = {};
   rows.forEach((i) => {
-    const k = i.assignee || 'Unassigned';
-    if (!byPse[k]) byPse[k] = { valid: [], missing: [] };
-    (isMrrMissing(i.mrr) ? byPse[k].missing : byPse[k].valid).push(i);
+    if (!byPse[i.assignee]) byPse[i.assignee] = { valid: [], missing: [] };
+    (isMrrMissing(i.mrr) ? byPse[i.assignee].missing : byPse[i.assignee].valid).push(i);
   });
   const pseNames = Object.keys(byPse).sort();
+  const mrrByPseEntries = pseNames.map((p) => [p, byPse[p].valid.reduce((s, i) => s + i.mrr, 0)]).sort((a, b) => b[1] - a[1]);
 
-  const mrrByPseEntries = pseNames
-    .map((p) => [p, byPse[p].valid.reduce((s, i) => s + i.mrr, 0)])
-    .sort((a, b) => b[1] - a[1]);
+  const dealSizeRow = (i) => `
+    <tr data-key="${i.key}">
+      <td style="color:var(--b);font-weight:700">${i.key}</td>
+      <td>${i.summary || ''}</td>
+      <td>${i.assignee}</td>
+      <td>${fbadge(i.status)}</td>
+      <td>${fmtUsd(i.mrr)}</td>
+      <td>${fmtUsd(i.arr)}</td>
+      <td>${jiraLinkCell(i)}</td>
+    </tr>`;
 
   document.getElementById('app').innerHTML = `
     <div class="page">
       <div class="ph"><div class="pht">MRR</div><div class="phs">Live from Jira "MRR (USD)" field · zero/one values are treated as not filled in</div></div>
-      ${filterBar()}
       <div class="krow">
         <div class="kpi"><div class="kb" style="background:var(--g)"></div><div class="kl">Total MRR</div><div class="kv" style="font-size:24px">${fmtUsd(totalMrr)}</div><div class="ks">Across ${valid.length} deals with a real value</div></div>
         <div class="kpi"><div class="kb" style="background:var(--b)"></div><div class="kl">Deals w/ MRR set</div><div class="kv">${valid.length}</div><div class="ks">of ${rows.length} matching filters</div></div>
         <div class="kpi"><div class="kb" style="background:var(--a)"></div><div class="kl">Missing / 0 / 1</div><div class="kv">${missing.length}</div><div class="ks">Needs an update in Jira</div></div>
+        <div class="kpi"><div class="kb" style="background:#7C3AED"></div><div class="kl">Large Deals</div><div class="kv">${largeDeals.length}</div><div class="ks">ARR &gt; $100k · use sidebar to filter</div></div>
+        <div class="kpi"><div class="kb"></div><div class="kl">Small Deals</div><div class="kv">${smallDeals.length}</div><div class="ks">ARR ≤ $100k</div></div>
       </div>
 
-      <div class="card" style="margin-bottom:16px"><div class="ct">MRR by PSE</div><div class="cs">Sum of valid MRR per PSE (USD)</div><div style="height:240px"><canvas id="mrrPseChart"></canvas></div></div>
+      <div class="card" style="margin-bottom:16px"><div class="ct">MRR by PSE</div><div class="cs">Sum of valid MRR per PSE (USD) · click a bar</div><div style="height:240px"><canvas id="mrrPseChart"></canvas></div></div>
+
+      <div class="sh"><div class="sht">Large Deals (ARR &gt; $100k)</div><div class="shl"></div><div class="shb">${largeDeals.length}</div></div>
+      <div class="tc">
+        <div class="tw">
+          <table>
+            <thead><tr><th>Key</th><th>Client</th><th>PSE</th><th>Status</th><th>MRR</th><th>ARR</th><th></th></tr></thead>
+            <tbody>${largeDeals.map(dealSizeRow).join('') || '<tr><td colspan="7" class="empty">No large deals match the current filters</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
 
       <div class="ph"><div class="pht" style="font-size:14px">Deals Missing MRR — by PSE</div><button class="clear-btn" id="exportMissingBtn">Export CSV</button></div>
       ${
@@ -536,27 +853,24 @@ function renderMrr() {
       }
     </div>`;
 
-  bindFilterBarEvents(renderMrr);
   document.querySelectorAll('tbody tr[data-key]').forEach((tr) => tr.addEventListener('click', () => openCardModal(tr.dataset.key)));
   document.getElementById('exportMissingBtn').addEventListener('click', () => {
-    const csv = toCsv(missing, [
+    downloadCsv('psv-missing-mrr.csv', toCsv(missing, [
       { label: 'PSE', value: (r) => r.assignee },
       { label: 'Key', value: (r) => r.key },
       { label: 'Client', value: (r) => r.summary },
       { label: 'Status', value: (r) => r.status },
       { label: 'MRR value', value: (r) => r.mrr },
       { label: 'Updated', value: (r) => r.updated },
-    ]);
-    downloadCsv('psv-missing-mrr.csv', csv);
+    ]));
   });
 
   destroyCharts();
   addChart(
-    'mrrPseChart',
-    'bar',
-    mrrByPseEntries.map((e) => e[0]),
+    'mrrPseChart', 'bar', mrrByPseEntries.map((e) => e[0]),
     [{ label: 'MRR (USD)', data: mrrByPseEntries.map((e) => e[1]), backgroundColor: '#12B76A' }],
-    { indexAxis: 'y' }
+    { indexAxis: 'y' },
+    (pse) => goToFilteredList(`MRR — ${pse}`, (i) => i.assignee === pse && !isMrrMissing(i.mrr))
   );
 }
 
@@ -572,13 +886,14 @@ function renderClosingSoon() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Closing Soon</div><div class="phs">Deals with an Expected Sales Closure date in the next 30 days</div></div>
-      ${filterBar()}
+      <div class="ph">
+        <div><div class="pht">Closing Soon</div><div class="phs">Deals with an Expected Sales Closure date in the next 30 days</div></div>
+        <button class="clear-btn" id="exportBtn">Export CSV</button>
+      </div>
       <div class="krow">
         <div class="kpi"><div class="kb"></div><div class="kl">Closing in 30 Days</div><div class="kv">${rows.length}</div><div class="ks">Matching current filters</div></div>
         <div class="kpi"><div class="kb" style="background:var(--g)"></div><div class="kl">MRR at Stake</div><div class="kv" style="font-size:22px">${fmtUsd(totalMrr)}</div><div class="ks">Sum of valid MRR</div></div>
       </div>
-      <div class="ph"><div></div><button class="clear-btn" id="exportBtn">Export CSV</button></div>
       <div class="tc">
         <div class="th"><span class="tht">Cards</span><span class="ths">Sorted by soonest closure date</span></div>
         <div class="tw">
@@ -593,7 +908,7 @@ function renderClosingSoon() {
                   <td style="color:var(--b);font-weight:700">${i.key}</td>
                   <td>${i.summary || ''}</td>
                   <td>${fbadge(i.status)}</td>
-                  <td>${i.assignee || '—'}</td>
+                  <td>${i.assignee}</td>
                   <td>${i.kam || '—'}</td>
                   <td>${fmtUsd(i.mrr)}</td>
                   <td>${new Date(i.expectedSalesClosure).toLocaleDateString('en-IN')}</td>
@@ -608,10 +923,9 @@ function renderClosingSoon() {
       </div>
     </div>`;
 
-  bindFilterBarEvents(renderClosingSoon);
   document.querySelectorAll('tbody tr[data-key]').forEach((tr) => tr.addEventListener('click', () => openCardModal(tr.dataset.key)));
   document.getElementById('exportBtn').addEventListener('click', () => {
-    const csv = toCsv(rows, [
+    downloadCsv('psv-closing-soon.csv', toCsv(rows, [
       { label: 'Key', value: (r) => r.key },
       { label: 'Client', value: (r) => r.summary },
       { label: 'Status', value: (r) => r.status },
@@ -620,8 +934,7 @@ function renderClosingSoon() {
       { label: 'MRR', value: (r) => r.mrr },
       { label: 'Closure Date', value: (r) => r.expectedSalesClosure },
       { label: 'Days Left', value: (r) => r.daysUntil },
-    ]);
-    downloadCsv('psv-closing-soon.csv', csv);
+    ]));
   });
 }
 
@@ -636,12 +949,12 @@ function renderTat() {
 
   const avgCompleted = avg(completed.map((i) => i.tatDays));
   const avgRunning = avg(running.map((i) => i.tatDays));
+  const avgHold = avg(started.map((i) => i.tatHoldDays || 0));
 
   const byPse = {};
   started.forEach((i) => {
-    const k = i.assignee || 'Unassigned';
-    if (!byPse[k]) byPse[k] = [];
-    byPse[k].push(i);
+    if (!byPse[i.assignee]) byPse[i.assignee] = [];
+    byPse[i.assignee].push(i);
   });
   const pseNames = Object.keys(byPse).sort((a, b) => byPse[b].length - byPse[a].length);
   const avgByPseEntries = pseNames
@@ -654,77 +967,78 @@ function renderTat() {
       <td style="color:var(--b);font-weight:700">${i.key}</td>
       <td>${i.summary || ''}</td>
       <td>${fbadge(i.status)}</td>
-      <td>${i.assignee || '—'}</td>
+      <td>${i.assignee}</td>
       <td>${i.tatStartDate ? new Date(i.tatStartDate).toLocaleDateString('en-IN') : '—'}</td>
       <td>${i.tatEndDate ? new Date(i.tatEndDate).toLocaleDateString('en-IN') : i.tatStatus === 'in_progress' ? '<span style="color:var(--t3)">ongoing</span>' : '—'}</td>
+      <td>${i.tatHoldDays ? `<span class="bd ba">${i.tatHoldDays}d</span>` : '—'}</td>
       <td>${tatSeverityBadge(i.tatDays)}</td>
     </tr>`;
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">TAT (Turnaround Time)</div><div class="phs">Req. Gathering → Solutions Draft Shared · Great ≤15d · Mid ≤30d · Watch ≤60d · Flagged &gt;60d</div></div>
-      ${filterBar()}
+      <div class="ph"><div class="pht">TAT (Turnaround Time)</div><div class="phs">Solutioning Start Date → SoW Send Date, excluding any time spent in "Pending On Client" · Great ≤15d · Mid ≤30d · Watch ≤60d · Flagged &gt;60d</div></div>
       <div class="krow">
         <div class="kpi"><div class="kb" style="background:var(--g)"></div><div class="kl">Avg TAT (Completed)</div><div class="kv">${avgCompleted ?? '—'}${avgCompleted != null ? 'd' : ''}</div><div class="ks">Across ${completed.length} completed deals</div></div>
         <div class="kpi"><div class="kb" style="background:var(--b)"></div><div class="kl">Avg TAT (Running)</div><div class="kv">${avgRunning ?? '—'}${avgRunning != null ? 'd' : ''}</div><div class="ks">Across ${running.length} in-progress deals</div></div>
+        <div class="kpi"><div class="kb" style="background:var(--a)"></div><div class="kl">Avg Client Hold</div><div class="kv">${avgHold ?? '—'}${avgHold != null ? 'd' : ''}</div><div class="ks">Time excluded (Pending On Client)</div></div>
         <div class="kpi"><div class="kb" style="background:var(--r)"></div><div class="kl">Flagged &gt;60d</div><div class="kv">${flagged.length}</div><div class="ks">Needs attention</div></div>
-        <div class="kpi"><div class="kb"></div><div class="kl">TAT Not Started</div><div class="kv">${notStartedCount}</div><div class="ks">Never entered Req. Gathering from Upcoming</div></div>
+        <div class="kpi"><div class="kb"></div><div class="kl">TAT Not Started</div><div class="kv">${notStartedCount}</div><div class="ks">No Solutioning Start Date yet</div></div>
       </div>
 
-      <div class="card" style="margin-bottom:16px"><div class="ct">Average Completed TAT by PSE</div><div class="cs">Lower is better (days)</div><div style="height:240px"><canvas id="tatPseChart"></canvas></div></div>
+      <div class="card" style="margin-bottom:16px"><div class="ct">Average Completed TAT by PSE</div><div class="cs">Lower is better (days) · click a bar</div><div style="height:240px"><canvas id="tatPseChart"></canvas></div></div>
 
       <div class="ph"><div class="pht" style="font-size:14px">Flagged Deals (&gt;60 days)</div>${flagged.length ? '<button class="clear-btn" id="exportFlaggedBtn">Export CSV</button>' : ''}</div>
       <div class="tc">
         <div class="tw">
           <table>
-            <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>PSE</th><th>TAT Start</th><th>TAT End</th><th>TAT</th></tr></thead>
-            <tbody>${flagged.map(dealRow).join('') || '<tr><td colspan="7" class="empty">No deals are over 60 days 🎉</td></tr>'}</tbody>
+            <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>PSE</th><th>Sol. Start</th><th>SoW Send</th><th>Client Hold</th><th>TAT</th></tr></thead>
+            <tbody>${flagged.map(dealRow).join('') || '<tr><td colspan="8" class="empty">No deals are over 60 days 🎉</td></tr>'}</tbody>
           </table>
         </div>
       </div>
 
       <div class="sh"><div class="sht">Deal-wise TAT by PSE</div><div class="shl"></div></div>
-      ${pseNames
-        .map((p) => {
-          const list = byPse[p].slice().sort((a, b) => b.tatDays - a.tatDays);
-          const pseAvg = avg(list.filter((i) => i.tatStatus === 'completed').map((i) => i.tatDays));
-          return `
+      ${
+        pseNames
+          .map((p) => {
+            const list = byPse[p].slice().sort((a, b) => b.tatDays - a.tatDays);
+            const pseAvg = avg(list.filter((i) => i.tatStatus === 'completed').map((i) => i.tatDays));
+            return `
         <div class="tc">
           <div class="th"><span class="tht">${p}</span><span class="ths">${list.length} deal(s) with TAT started${pseAvg != null ? ` · avg completed ${pseAvg}d` : ''}</span></div>
           <div class="tw">
             <table>
-              <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>PSE</th><th>TAT Start</th><th>TAT End</th><th>TAT</th></tr></thead>
+              <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>PSE</th><th>Sol. Start</th><th>SoW Send</th><th>Client Hold</th><th>TAT</th></tr></thead>
               <tbody>${list.map(dealRow).join('')}</tbody>
             </table>
           </div>
         </div>`;
-        })
-        .join('') || '<div class="empty">No deals have entered Req. Gathering yet</div>'}
+          })
+          .join('') || '<div class="empty">No deals have a Solutioning Start Date yet</div>'
+      }
     </div>`;
 
-  bindFilterBarEvents(renderTat);
   document.querySelectorAll('tbody tr[data-key]').forEach((tr) => tr.addEventListener('click', () => openCardModal(tr.dataset.key)));
   const exportBtn = document.getElementById('exportFlaggedBtn');
   if (exportBtn) exportBtn.addEventListener('click', () => {
-    const csv = toCsv(flagged, [
+    downloadCsv('psv-tat-flagged.csv', toCsv(flagged, [
       { label: 'Key', value: (r) => r.key },
       { label: 'Client', value: (r) => r.summary },
       { label: 'Status', value: (r) => r.status },
       { label: 'PSE', value: (r) => r.assignee },
-      { label: 'TAT Start', value: (r) => r.tatStartDate },
-      { label: 'TAT End', value: (r) => r.tatEndDate },
+      { label: 'Solutioning Start', value: (r) => r.tatStartDate },
+      { label: 'SoW Send', value: (r) => r.tatEndDate },
+      { label: 'Client Hold Days', value: (r) => r.tatHoldDays },
       { label: 'TAT Days', value: (r) => r.tatDays },
-    ]);
-    downloadCsv('psv-tat-flagged.csv', csv);
+    ]));
   });
 
   destroyCharts();
   addChart(
-    'tatPseChart',
-    'bar',
-    avgByPseEntries.map((e) => e[0]),
+    'tatPseChart', 'bar', avgByPseEntries.map((e) => e[0]),
     [{ label: 'Avg Completed TAT (days)', data: avgByPseEntries.map((e) => e[1]), backgroundColor: avgByPseEntries.map((e) => ({ great: '#12B76A', mid: '#0054FC', watch: '#D97706', flagged: '#DC2626' }[tatSeverity(e[1])] || '#94A3B8')) }],
-    { indexAxis: 'y' }
+    { indexAxis: 'y' },
+    (pse) => goToFilteredList(`TAT — ${pse}`, (i) => i.assignee === pse && i.tatDays != null)
   );
 }
 
@@ -733,10 +1047,9 @@ function renderTeam() {
   const rows = applyFilters(STATE.data.issues);
   const byPse = {};
   rows.forEach((i) => {
-    const k = i.assignee || 'Unassigned';
-    if (!byPse[k]) byPse[k] = { total: 0, active: 0, won: 0, churn: 0, cold: 0, rejected: 0 };
-    byPse[k].total++;
-    byPse[k][i.stageGroup]++;
+    if (!byPse[i.assignee]) byPse[i.assignee] = { total: 0, active: 0, won: 0, churn: 0, cold: 0, rejected: 0 };
+    byPse[i.assignee].total++;
+    byPse[i.assignee][i.stageGroup]++;
   });
   const pseNames = Object.keys(byPse).sort((a, b) => byPse[b].total - byPse[a].total);
 
@@ -747,15 +1060,13 @@ function renderTeam() {
     pseNames.forEach((p) => (statusByPse[s][p] = 0));
   });
   rows.forEach((i) => {
-    const k = i.assignee || 'Unassigned';
     if (!statusByPse[i.status]) statusByPse[i.status] = {};
-    statusByPse[i.status][k] = (statusByPse[i.status][k] || 0) + 1;
+    statusByPse[i.status][i.assignee] = (statusByPse[i.status][i.assignee] || 0) + 1;
   });
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Team Performance</div><div class="phs">Per-PSE win/churn rates, computed live from current statuses</div></div>
-      ${filterBar()}
+      <div class="ph"><div class="pht">Team Performance</div><div class="phs">Per-PSE win/churn rates, computed live from current statuses · click a bar</div></div>
       <div class="krow">
         ${pseNames
           .map((p) => {
@@ -781,7 +1092,7 @@ function renderTeam() {
               ${statuses
                 .map((s) => {
                   const total = pseNames.reduce((sum, p) => sum + (statusByPse[s][p] || 0), 0);
-                  return `<tr><td class="fw7" style="font-weight:700">${s}</td>${pseNames.map((p) => `<td>${statusByPse[s][p] || 0}</td>`).join('')}<td style="font-weight:700">${total}</td></tr>`;
+                  return `<tr><td style="font-weight:700">${s}</td>${pseNames.map((p) => `<td>${statusByPse[s][p] || 0}</td>`).join('')}<td style="font-weight:700">${total}</td></tr>`;
                 })
                 .join('')}
               <tr style="background:#F7F9FC"><td style="font-weight:800">TOTAL</td>${pseNames.map((p) => `<td style="font-weight:800">${byPse[p].total}</td>`).join('')}<td style="font-weight:800">${rows.length}</td></tr>
@@ -791,12 +1102,9 @@ function renderTeam() {
       </div>
     </div>`;
 
-  bindFilterBarEvents(renderTeam);
   destroyCharts();
   addChart(
-    'pseStackChart',
-    'bar',
-    pseNames,
+    'pseStackChart', 'bar', pseNames,
     [
       { label: 'Active', data: pseNames.map((p) => byPse[p].active), backgroundColor: '#0054FC' },
       { label: 'Won', data: pseNames.map((p) => byPse[p].won), backgroundColor: '#12B76A' },
@@ -806,14 +1114,13 @@ function renderTeam() {
     { plugins: { legend: { display: true, position: 'bottom' } }, scales: { x: { stacked: true }, y: { stacked: true } } }
   );
   addChart(
-    'rateChart',
-    'bar',
-    pseNames,
+    'rateChart', 'bar', pseNames,
     [
       { label: 'Win %', data: pseNames.map((p) => (byPse[p].total ? +((byPse[p].won / byPse[p].total) * 100).toFixed(1) : 0)), backgroundColor: '#12B76A' },
       { label: 'Churn %', data: pseNames.map((p) => (byPse[p].total ? +((byPse[p].churn / byPse[p].total) * 100).toFixed(1) : 0)), backgroundColor: '#DC2626' },
     ],
-    { plugins: { legend: { display: true, position: 'bottom' } } }
+    { plugins: { legend: { display: true, position: 'bottom' } } },
+    (pse) => goToFilteredList(`PSE: ${pse}`, (i) => i.assignee === pse)
   );
 }
 
@@ -831,13 +1138,7 @@ function renderActivity() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Board Activity Log</div><div class="phs">Every field change across all PSV cards, most recent first · showing ${feed.length} of ${allActivity.length}</div></div>
-      <div class="fbar">
-        <div class="fgroup">
-          <label>Search</label>
-          <input class="fi" id="searchInput" type="text" placeholder="Card key, client, author…" value="${escapeAttr(STATE.filters.search)}"/>
-        </div>
-      </div>
+      <div class="ph"><div class="pht">Board Activity Log</div><div class="phs">Every field change across all PSV cards, most recent first · showing ${feed.length} of ${allActivity.length} · use the sidebar search</div></div>
       <div class="tc">
         <div class="th"><span class="tht">Activity Feed</span><span class="ths">Board-wide</span></div>
         <div class="tw" style="padding:14px 18px">
@@ -859,14 +1160,6 @@ function renderActivity() {
       </div>
     </div>`;
 
-  const input = document.getElementById('searchInput');
-  input.addEventListener('input', () => {
-    STATE.filters.search = input.value;
-    renderActivity();
-    document.getElementById('searchInput').focus();
-    const v = document.getElementById('searchInput').value;
-    document.getElementById('searchInput').setSelectionRange(v.length, v.length);
-  });
   document.querySelectorAll('.tl-key').forEach((el) => el.addEventListener('click', () => openCardModal(el.dataset.key)));
 }
 
@@ -876,6 +1169,15 @@ function describeActivity(h) {
   if (h.field === 'priority') return `Priority changed from <b>${h.from || '—'}</b> to <b>${h.to || '—'}</b>`;
   if (h.field === 'Comment') return `Comment added`;
   return `<b>${h.field}</b> updated${h.to ? ` to <b>${h.to}</b>` : ''}`;
+}
+
+// ---------- Daily Tracker tab (placeholder — built separately, needs its own storage) ----------
+function renderTracker() {
+  document.getElementById('app').innerHTML = `
+    <div class="page">
+      <div class="ph"><div class="pht">Daily Task Tracker</div><div class="phs">Coming soon</div></div>
+      <div class="empty">The Daily Task Tracker is being built as a separate feature (it needs its own shared, persistent storage since it's manually entered, not sourced from Jira).</div>
+    </div>`;
 }
 
 // ---------- card modal ----------
@@ -902,7 +1204,7 @@ function openCardModal(key) {
   document.getElementById('modalContent').innerHTML = `
     <div class="modal-head">
       <div>
-        <div class="modal-key">${issue.key}</div>
+        <div class="modal-key">${issue.key}${issue.isPreQuarterHoldover ? ' <span class="flag-badge">🔴 Red Flag</span>' : ''}</div>
         <div class="modal-title">${issue.summary || ''}</div>
       </div>
       <button class="modal-close" id="modalCloseBtn">✕</button>
@@ -913,15 +1215,19 @@ function openCardModal(key) {
         ${field('Priority', issue.priority)}
         ${field('PSE (Assignee)', issue.assignee)}
         ${field('KAM', issue.kam)}
+        ${field('Sales Representative', issue.salesRep)}
         ${field('Request Category', issue.requestCategory)}
         ${field('Modules', modulePills(issue.modules))}
+        ${field('MRR (USD)', fmtUsd(issue.mrr))}
+        ${field('ARR (USD)', fmtUsd(issue.arr))}
+        ${field('Deal Size', dealSizeBadge(issue.dealSize))}
         ${field('Shipment Volume / Month', issue.shipmentVolume)}
         ${field('Expected Closure (weeks)', issue.expectedClosureWeeks)}
         ${field('Expected Sales Closure', issue.expectedSalesClosure)}
         ${field('Solutioning Start Date', issue.solutioningStartDate)}
         ${field('SoW Send Date', issue.sowSendDate)}
         ${field('SoW Confirmation Date', issue.sowConfirmationDate)}
-        ${field('TAT', tatLabel(issue) + (issue.tatStartDate ? ` <span style="color:var(--t3);font-size:11px">(${new Date(issue.tatStartDate).toLocaleDateString('en-IN')} → ${issue.tatEndDate ? new Date(issue.tatEndDate).toLocaleDateString('en-IN') : 'ongoing'})</span>` : ''))}
+        ${field('TAT', tatLabel(issue) + (issue.tatHoldDays ? ` <span style="color:var(--t3);font-size:11px">(excl. ${issue.tatHoldDays}d client hold)</span>` : ''))}
         ${field('Created', new Date(issue.created).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }))}
         ${field('Last Updated', new Date(issue.updated).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }))}
       </div>
@@ -942,105 +1248,23 @@ document.getElementById('modalOverlay').addEventListener('click', (e) => {
   if (e.target.id === 'modalOverlay') closeModal();
 });
 
-// ---------- filter bar event binding ----------
-function bindFilterBarEvents(rerender) {
-  const searchInput = document.getElementById('searchInput');
-  if (searchInput) {
-    searchInput.addEventListener('input', () => {
-      STATE.filters.search = searchInput.value;
-      rerender();
-      const el = document.getElementById('searchInput');
-      if (el) {
-        el.focus();
-        el.setSelectionRange(el.value.length, el.value.length);
-      }
-    });
-  }
-
-  const tatSelect = document.getElementById('tatSelect');
-  if (tatSelect) tatSelect.addEventListener('change', () => {
-    STATE.filters.tat = tatSelect.value;
-    rerender();
-  });
-
-  document.querySelectorAll('[data-mtoggle]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const id = btn.dataset.mtoggle;
-      const panel = document.getElementById(`panel-${id}`);
-      const isOpen = panel.classList.contains('open');
-      document.querySelectorAll('.msel-panel').forEach((p) => p.classList.remove('open'));
-      if (!isOpen) panel.classList.add('open');
-    });
-  });
-
-  document.querySelectorAll('[data-mgroup]').forEach((cb) => {
-    cb.addEventListener('change', () => {
-      const group = cb.dataset.mgroup;
-      const set = STATE.filters[group];
-      if (cb.checked) set.add(cb.value);
-      else set.delete(cb.value);
-      rerender();
-    });
-  });
-
-  const clearBtn = document.getElementById('clearFiltersBtn');
-  if (clearBtn) clearBtn.addEventListener('click', () => {
-    STATE.filters = { pse: new Set(), status: new Set(), modules: new Set(), tat: '', search: '' };
-    rerender();
-  });
-
-  document.querySelectorAll('[data-chip-group]').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      const group = chip.dataset.chipGroup;
-      if (group === 'tat') STATE.filters.tat = '';
-      else STATE.filters[group].delete(chip.dataset.chipValue);
-      rerender();
-    });
-  });
-}
-
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.msel')) {
-    document.querySelectorAll('.msel-panel').forEach((p) => p.classList.remove('open'));
-  }
-});
-
-// ---------- charts ----------
-function destroyCharts() {
-  STATE.charts.forEach((c) => c.destroy());
-  STATE.charts = [];
-}
-
-function addChart(canvasId, type, labels, datasets, extraOptions = {}) {
-  const el = document.getElementById(canvasId);
-  if (!el) return;
-  const chart = new Chart(el, {
-    type,
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      ...extraOptions,
-    },
-  });
-  STATE.charts.push(chart);
-}
-
 // ---------- main render dispatch ----------
 function render() {
   document.querySelectorAll('.nt').forEach((t) => t.classList.remove('active'));
-  const navName = ['status', 'segment'].includes(STATE.route.name) ? 'overview' : STATE.route.name;
+  const navName = ['status', 'segment', 'list'].includes(STATE.route.name) ? 'overview' : STATE.route.name;
   document.querySelector(`.nt[data-route="${navName}"]`)?.classList.add('active');
 
   if (STATE.route.name === 'status') renderStatusDrilldown(STATE.route.param);
   else if (STATE.route.name === 'segment') renderSegment(STATE.route.param);
+  else if (STATE.route.name === 'list') renderAdhocList();
   else if (STATE.route.name === 'activity') renderActivity();
   else if (STATE.route.name === 'mrr') renderMrr();
   else if (STATE.route.name === 'closing') renderClosingSoon();
   else if (STATE.route.name === 'tat') renderTat();
   else if (STATE.route.name === 'team') renderTeam();
+  else if (STATE.route.name === 'pipeline') renderPipeline();
+  else if (STATE.route.name === 'c3m') renderC3m();
+  else if (STATE.route.name === 'tracker') renderTracker();
   else renderOverview();
 }
 

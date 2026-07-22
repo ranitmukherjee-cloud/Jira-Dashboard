@@ -25,16 +25,22 @@
 
 <nav class="nav">
   <div class="nt active" data-route="overview">Overview</div>
+  <div class="nt" data-route="pipeline">Active Pipeline</div>
   <div class="nt" data-route="mrr">MRR</div>
   <div class="nt" data-route="closing">Closing Soon</div>
   <div class="nt" data-route="tat">TAT</div>
+  <div class="nt" data-route="c3m">Check-in-3-Months</div>
   <div class="nt" data-route="team">Team Performance</div>
+  <div class="nt" data-route="tracker">Daily Tracker</div>
   <div class="nt" data-route="activity">Activity Log</div>
 </nav>
 
-<main id="app">
-  <div class="loading">Loading dashboard…</div>
-</main>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <main id="app">
+    <div class="loading">Loading dashboard…</div>
+  </main>
+</div>
 
 <div class="modal-overlay" id="modalOverlay">
   <div class="modal" id="modalContent"></div>
