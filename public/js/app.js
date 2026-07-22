@@ -1249,10 +1249,13 @@ function addDays(dateStr, delta) {
 }
 
 // Mirrors lib/tracker.js: still-open tasks carry forward to every day from
-// creation onward; a Done task only shows on the day it was completed.
+// creation onward; once Done, the task remains visible on its start day,
+// its actual completion day, and its due day — so both ends stay on record.
 function taskVisibleOnDay(task, day) {
   if (task.createdDate > day) return false;
-  if (task.status === 'Done') return task.completedDate === day;
+  if (task.status === 'Done') {
+    return day === task.createdDate || day === task.completedDate || day === task.dueDate;
+  }
   return true;
 }
 
