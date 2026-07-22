@@ -1,6 +1,12 @@
-const { getData } = require('../lib/store');
+const { getLiveData } = require('../lib/live');
 
+// Live board data, pulled straight from Jira (short in-memory cache only).
 module.exports = async (req, res) => {
-  const data = await getData();
-  res.status(200).json(data);
+  try {
+    const data = await getLiveData();
+    res.status(200).json(data);
+  } catch (err) {
+    console.error('Live data fetch failed:', err);
+    res.status(500).json({ generatedAt: null, count: 0, issues: [], error: err.message });
+  }
 };
