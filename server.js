@@ -7,7 +7,7 @@ const path = require('path');
 const { getLiveData } = require('./lib/live');
 const { listTasks, createTask, updateTask, deleteTask } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
-const { listLinks, addLink, updateLink, reorderLinks, deleteLink } = require('./lib/quickLinks');
+const { listLinks, addLink, updateLink, reorderLinks, deleteLink, listGroups, createGroup } = require('./lib/quickLinks');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -105,6 +105,16 @@ app.post('/api/quicklinks/reorder', async (req, res) => {
 app.delete('/api/quicklinks/:id', async (req, res) => {
   try {
     res.json(await deleteLink(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.get('/api/quicklinks/groups', async (req, res) => {
+  res.json(await listGroups());
+});
+app.post('/api/quicklinks/groups', async (req, res) => {
+  try {
+    res.status(201).json(await createGroup((req.body || {}).name));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

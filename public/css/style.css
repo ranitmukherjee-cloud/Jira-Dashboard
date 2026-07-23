@@ -84,6 +84,9 @@ body{background:var(--bg);color:var(--t1);font-family:'Inter',-apple-system,Blin
 
 .page{padding:22px 24px 48px;max-width:1500px;margin:0 auto;flex:1;min-width:0;}
 .ph{margin-bottom:16px;display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+.ph .link-add-btn{align-self:center;flex-shrink:0;}
+.ph-text{display:flex;flex-direction:column;gap:2px;}
+.link-add-form-group{max-width:340px;}
 .pht{font-size:19px;font-weight:800;color:var(--n);letter-spacing:-.2px;}
 .phs{font-size:11px;color:var(--t3);}
 .back-link{font-size:11.5px;font-weight:700;color:var(--b);cursor:pointer;}

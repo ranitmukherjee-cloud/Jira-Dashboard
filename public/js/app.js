@@ -1430,9 +1430,18 @@ async function saveTrackerField(id, field, value, rerenderAfterSave) {
 async function renderQuickLinks() {
   document.getElementById('app').innerHTML = '<div class="page"><div class="loading">Loading quick links…</div></div>';
   try {
-    const res = await fetch('/api/quicklinks', { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    STATE.quickLinks = await res.json();
+    const [links, groups] = await Promise.all([
+      fetch('/api/quicklinks', { cache: 'no-store' }).then((r) => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }),
+      fetch('/api/quicklinks/groups', { cache: 'no-store' }).then((r) => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }),
+    ]);
+    STATE.quickLinks = links;
+    STATE.quickLinksGroups = groups;
   } catch (err) {
     document.getElementById('app').innerHTML = `<div class="page"><div class="empty">Could not load Quick Links: ${err.message}</div></div>`;
     return;
@@ -1478,29 +1487,86 @@ function renderQuickLinksSidebar(groupNames) {
   });
 }
 
+function createGroupFormHtml() {
+  return `
+  <div class="link-add-form link-add-form-group">
+    <input class="fi" id="newGroupName" type="text" placeholder="New group name…"/>
+    <button class="tk-add" id="saveGroupBtn">Save</button>
+  </div>`;
+}
+
+function bindCreateGroupHandlers() {
+  const createBtn = document.getElementById('createGroupBtn');
+  if (createBtn) {
+    createBtn.addEventListener('click', () => {
+      STATE.quickLinksCreatingGroup = !STATE.quickLinksCreatingGroup;
+      renderQuickLinksView();
+    });
+  }
+  const saveBtn = document.getElementById('saveGroupBtn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const input = document.getElementById('newGroupName');
+      const name = input.value.trim();
+      if (!name) return;
+      saveBtn.disabled = true;
+      try {
+        const res = await fetch('/api/quicklinks/groups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not create group');
+        STATE.quickLinksGroups = data;
+        STATE.quickLinksCreatingGroup = false;
+        STATE.quickLinksFilter = name;
+        renderQuickLinksView();
+      } catch (err) {
+        alert(err.message);
+        saveBtn.disabled = false;
+      }
+    });
+  }
+}
+
 function renderQuickLinksView() {
   const links = STATE.quickLinks || [];
-
-  if (!links.length) {
-    document.getElementById('sidebar').style.display = 'none';
-    document.getElementById('app').innerHTML = `
-      <div class="page">
-        <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div></div>
-        <div class="empty">No links added yet — use "+ Add Link" once a group exists, or ask to have the first ones added.</div>
-      </div>`;
-    return;
-  }
+  const storedGroups = STATE.quickLinksGroups || [];
 
   const groups = {};
+  const groupNames = storedGroups.slice();
+  groupNames.forEach((g) => (groups[g] = []));
   links
     .slice()
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     .forEach((l) => {
       const g = l.group || 'Links';
-      if (!groups[g]) groups[g] = [];
+      if (!groups[g]) {
+        groups[g] = [];
+        groupNames.push(g); // defensive: a link references a group missing from the stored list
+      }
       groups[g].push(l);
     });
-  const groupNames = Object.keys(groups);
+
+  if (!groupNames.length) {
+    document.getElementById('sidebar').style.display = 'none';
+    document.getElementById('app').innerHTML = `
+      <div class="page">
+        <div class="ph">
+          <div class="ph-text">
+            <div class="pht">Quick Links</div>
+            <div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div>
+          </div>
+          <button class="link-add-btn" id="createGroupBtn">${STATE.quickLinksCreatingGroup ? 'Cancel' : '+ Create Group'}</button>
+        </div>
+        ${STATE.quickLinksCreatingGroup ? createGroupFormHtml() : ''}
+        ${STATE.quickLinksCreatingGroup ? '' : '<div class="empty">No groups yet — use "+ Create Group" to make the first one, then add links into it.</div>'}
+      </div>`;
+    bindCreateGroupHandlers();
+    return;
+  }
+
   if (!STATE.quickLinksFilter || !['all', ...groupNames].includes(STATE.quickLinksFilter)) {
     STATE.quickLinksFilter = 'all';
   }
@@ -1510,7 +1576,14 @@ function renderQuickLinksView() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team · drag a card to reorder it within its group, or drag a link/tab from your browser onto a group to add it</div></div>
+      <div class="ph">
+        <div class="ph-text">
+          <div class="pht">Quick Links</div>
+          <div class="phs">A quick-reference repository of important worksheets for the Product Solutions team · drag a card to reorder it within its group, or drag a link/tab from your browser onto a group to add it</div>
+        </div>
+        <button class="link-add-btn" id="createGroupBtn">${STATE.quickLinksCreatingGroup ? 'Cancel' : '+ Create Group'}</button>
+      </div>
+      ${STATE.quickLinksCreatingGroup ? createGroupFormHtml() : ''}
       ${visibleGroups
         .map((group) => {
           const groupLinks = groups[group];
@@ -1552,6 +1625,8 @@ function renderQuickLinksView() {
         })
         .join('')}
     </div>`;
+
+  bindCreateGroupHandlers();
 
   document.querySelectorAll('[data-add-group]').forEach((btn) => {
     btn.addEventListener('click', () => {
