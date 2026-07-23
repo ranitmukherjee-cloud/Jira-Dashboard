@@ -477,7 +477,6 @@ function renderOverview() {
   });
   const statusEntries = Object.entries(statusCounts).sort((a, b) => b[1] - a[1]);
 
-  const wonCount = base.filter((i) => i.stageGroup === 'won').length;
   const activeCount = base.filter((i) => i.stageGroup === 'active').length;
   const coldCount = base.filter((i) => i.stageGroup === 'cold').length;
   const stuckCount = base.filter((i) => i.stageGroup === 'active' && daysSince(i.updated) >= 14).length;
@@ -493,11 +492,10 @@ function renderOverview() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Overview</div><div class="phs">Live from Jira PSV board · Project Cards only · click a status block, KPI, or chart bar to drill in</div></div>
+      <div class="ph"><div class="pht">Overview</div><div class="phs">Live from Jira PSV board · Project Cards only, closed/won deals excluded · click a status block, KPI, or chart bar to drill in</div></div>
       <div class="krow">
         <div class="kpi kpi-tint"><div class="kb"></div><div class="kl">Total Deals</div><div class="kv">${base.length}</div><div class="ks">Matching current filters</div></div>
         <div class="kpi kpi-tint seg-kpi" data-segment="active" style="--kc:var(--b)"><div class="kb" style="background:var(--b)"></div><div class="kl">Active</div><div class="kv">${activeCount}</div><div class="ks">In pipeline</div></div>
-        <div class="kpi kpi-tint seg-kpi" data-segment="won" style="--kc:var(--g)"><div class="kb" style="background:var(--g)"></div><div class="kl">Won</div><div class="kv">${wonCount}</div><div class="ks">Closed / completed</div></div>
         <div class="kpi kpi-tint seg-kpi" data-segment="cold" style="--kc:var(--a)"><div class="kb" style="background:var(--a)"></div><div class="kl">Cold / C3M</div><div class="kv">${coldCount}</div><div class="ks">Check in 3 months</div></div>
         <div class="kpi kpi-tint seg-kpi" data-segment="stuck" style="--kc:var(--a)"><div class="kb" style="background:var(--a)"></div><div class="kl">Stuck 14d+</div><div class="kv">${stuckCount}</div><div class="ks">Active, not moved recently</div></div>
         <div class="kpi kpi-tint" style="--kc:var(--b)"><div class="kb" style="background:var(--b)"></div><div class="kl">Total MRR</div><div class="kv" style="font-size:22px">${fmtUsd(totalMrr)}</div><div class="ks"><a href="#/mrr">View MRR tab →</a></div></div>
@@ -622,10 +620,9 @@ function renderStatusDrilldown(status) {
   });
 }
 
-// ---------- segment drilldown (Active/Won/Cold/Stuck KPI clicks) ----------
+// ---------- segment drilldown (Active/Cold/Stuck KPI clicks) ----------
 const SEGMENT_META = {
   active: { title: 'Active Deals', desc: 'All in-pipeline statuses' },
-  won: { title: 'Won Deals', desc: 'Completed / Closure-Contract Won' },
   cold: { title: 'Cold / Check in 3 Months', desc: '' },
   stuck: { title: 'Stuck Deals (14+ days idle)', desc: 'Active deals not updated recently' },
 };
@@ -845,6 +842,8 @@ function renderMrr() {
   const totalMrr = valid.reduce((s, i) => s + i.mrr, 0);
   const largeDeals = rows.filter((i) => i.dealSize === 'large').sort((a, b) => b.mrr - a.mrr);
   const smallDeals = rows.filter((i) => i.dealSize === 'small').sort((a, b) => b.mrr - a.mrr);
+  const largeArr = largeDeals.reduce((s, i) => s + i.arr, 0);
+  const smallArr = smallDeals.reduce((s, i) => s + i.arr, 0);
 
   const byPse = {};
   rows.forEach((i) => {
@@ -872,8 +871,8 @@ function renderMrr() {
         <div class="kpi"><div class="kb" style="background:var(--g)"></div><div class="kl">Total MRR</div><div class="kv" style="font-size:24px">${fmtUsd(totalMrr)}</div><div class="ks">Across ${valid.length} deals with a real value</div></div>
         <div class="kpi"><div class="kb" style="background:var(--b)"></div><div class="kl">Deals w/ MRR set</div><div class="kv">${valid.length}</div><div class="ks">of ${rows.length} matching filters</div></div>
         <div class="kpi"><div class="kb" style="background:var(--a)"></div><div class="kl">Missing / 0 / 1</div><div class="kv">${missing.length}</div><div class="ks">Needs an update in Jira</div></div>
-        <div class="kpi"><div class="kb" style="background:#7C3AED"></div><div class="kl">Large Deals</div><div class="kv">${largeDeals.length}</div><div class="ks">ARR &gt; $100k · use sidebar to filter</div></div>
-        <div class="kpi"><div class="kb"></div><div class="kl">Small Deals</div><div class="kv">${smallDeals.length}</div><div class="ks">ARR ≤ $100k</div></div>
+        <div class="kpi"><div class="kb" style="background:#7C3AED"></div><div class="kl">Large Deals — Total ARR</div><div class="kv" style="font-size:22px">${fmtUsd(largeArr)}</div><div class="ks">${largeDeals.length} deals &gt; $100k ARR</div></div>
+        <div class="kpi"><div class="kb"></div><div class="kl">Small Deals — Total ARR</div><div class="kv" style="font-size:22px">${fmtUsd(smallArr)}</div><div class="ks">${smallDeals.length} deals ≤ $100k ARR</div></div>
       </div>
 
       <div class="card" style="margin-bottom:16px"><div class="ct">MRR by PSE</div><div class="cs">Sum of valid MRR per PSE (USD) · click a bar</div><div style="height:240px"><canvas id="mrrPseChart"></canvas></div></div>
@@ -1135,21 +1134,17 @@ function renderTeam() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Team Performance</div><div class="phs">Per-PSE win rates, computed live from current statuses · click a bar</div></div>
+      <div class="ph"><div class="pht">Team Performance</div><div class="phs">Per-PSE live portfolio breakdown · closed/won deals aren't tracked here — this reflects work still in motion</div></div>
       <div class="krow">
         ${pseNames
           .map((p) => {
             const d = byPse[p];
-            const winRate = d.total ? ((d.won / d.total) * 100).toFixed(1) : '0.0';
-            return `<div class="kpi"><div class="kb"></div><div class="kl">${p}</div><div class="kv" style="font-size:22px">${d.total}</div><div class="ks">Win rate ${winRate}%</div></div>`;
+            return `<div class="kpi"><div class="kb"></div><div class="kl">${p}</div><div class="kv" style="font-size:22px">${d.total}</div><div class="ks">${d.active} active · ${d.cold} cold</div></div>`;
           })
           .join('')}
       </div>
 
-      <div class="g2">
-        <div class="card"><div class="ct">Portfolio by Stage Group</div><div class="cs">Active / Won / Cold per PSE</div><div style="height:280px"><canvas id="pseStackChart"></canvas></div></div>
-        <div class="card"><div class="ct">Win Rate</div><div class="cs">% per PSE · click a bar</div><div style="height:${hBarHeight(pseNames.length)}"><canvas id="rateChart"></canvas></div></div>
-      </div>
+      <div class="card" style="margin-bottom:16px"><div class="ct">Portfolio by Stage</div><div class="cs">Active / Cold per PSE</div><div style="height:280px"><canvas id="pseStackChart"></canvas></div></div>
 
       <div class="tc">
         <div class="th"><span class="tht">Status × PSE Matrix</span><span class="ths">Exact live counts</span></div>
@@ -1175,15 +1170,9 @@ function renderTeam() {
     'pseStackChart', 'bar', pseNames,
     [
       { label: 'Active', data: pseNames.map((p) => byPse[p].active), backgroundColor: '#0054FC' },
-      { label: 'Won', data: pseNames.map((p) => byPse[p].won), backgroundColor: '#12B76A' },
       { label: 'Cold', data: pseNames.map((p) => byPse[p].cold), backgroundColor: '#D97706' },
     ],
-    { plugins: { legend: { display: true, position: 'bottom' } }, scales: { x: { stacked: true }, y: { stacked: true } } }
-  );
-  addChart(
-    'rateChart', 'bar', pseNames,
-    [{ label: 'Win %', data: pseNames.map((p) => (byPse[p].total ? +((byPse[p].won / byPse[p].total) * 100).toFixed(1) : 0)), backgroundColor: '#12B76A' }],
-    { indexAxis: 'y' },
+    { plugins: { legend: { display: true, position: 'bottom' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
     (pse) => goToFilteredList(`PSE: ${pse}`, (i) => i.assignee === pse)
   );
 }
