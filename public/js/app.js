@@ -217,6 +217,10 @@ function escapeAttr(s) {
   return String(s).replace(/"/g, '&quot;');
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function daysSince(dateStr) {
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
 }
@@ -1727,7 +1731,7 @@ function trackerRow(t, day) {
     : '<span class="tk-ontime">—</span>';
   return `
     <tr data-id="${t.id}" class="${overdue ? 'row-flagged' : ''}">
-      <td class="tk-cell tk-cell-name"><input class="tk-input" data-field="dealName" value="${escapeAttr(t.dealName || '')}" placeholder="Task name…"/></td>
+      <td class="tk-cell tk-cell-name"><textarea class="tk-input tk-textarea" data-field="dealName" rows="1" placeholder="Task name…">${escapeHtml(t.dealName || '')}</textarea></td>
       <td class="tk-cell">
         <select class="tk-select tk-select-status ${statusCls}" data-field="status">
           ${['Open', 'In Progress', 'Done'].map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
@@ -1747,7 +1751,7 @@ function trackerRow(t, day) {
           <option value="true" ${t.helpInSow ? 'selected' : ''}>Yes</option>
         </select>
       </td>
-      <td class="tk-cell"><input class="tk-input" data-field="blocker" value="${escapeAttr(t.blocker || '')}" placeholder="Remarks…"/></td>
+      <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="blocker" rows="1" placeholder="Remarks…">${escapeHtml(t.blocker || '')}</textarea></td>
       <td class="tk-cell"><button class="tk-del" data-del-id="${t.id}" title="Delete task">✕</button></td>
     </tr>`;
 }
@@ -1927,7 +1931,7 @@ function renderTrackerView() {
           ? '<div class="tw"><div class="empty">Marked on leave for this working day</div></div>'
           : `<div class="tw">
         <table class="tk-table">
-          <thead><tr><th style="width:30%">Task Name</th><th>Status</th><th>Due Date</th><th>Delay</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:22%">Blocker</th><th></th></tr></thead>
+          <thead><tr><th style="width:34%">Task Name</th><th>Status</th><th>Due Date</th><th>Delay</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:24%">Blocker</th><th></th></tr></thead>
           <tbody>${rows.map((t) => trackerRow(t, day)).join('') || '<tr><td colspan="8" class="empty">No tasks</td></tr>'}</tbody>
         </table>
       </div>
