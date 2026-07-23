@@ -237,11 +237,27 @@ td.tk-cell{padding:2px 4px;}
 .tk-select-yn{min-width:78px;font-weight:700;border-radius:6px;text-align:center;}
 .tk-select-yn.yn-yes{background:var(--gb);color:#047857;}
 .tk-select-yn.yn-no{background:var(--rb);color:var(--r);}
-.tk-cell-delay{text-align:center;}
+.tk-cell-rem{text-align:center;}
+.tk-cell-due{white-space:nowrap;}
 .tk-ontime{color:var(--t3);}
+/* Locked (committed) due date — read-only, with a small lock marker */
+.tk-due-locked{background:#F1F5F9 !important;color:var(--t2);cursor:not-allowed;border:1px solid var(--bdr);border-radius:5px;max-width:140px;}
+.tk-lock{margin-left:4px;font-size:10px;opacity:.6;}
+/* Days Remaining chips: green early / grey on-time / red late */
+.rem-chip{display:inline-block;min-width:38px;text-align:center;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:800;cursor:help;}
+.rem-chip.rem-early{background:var(--gb);color:#047857;}
+.rem-chip.rem-ontime{background:var(--nl);color:var(--t2);}
+.rem-chip.rem-late{background:var(--rb);color:var(--r);}
+/* Row tints: red for late/overdue, green for finished-early */
 .delay-chip{display:inline-block;background:var(--rb);color:var(--r);border:1px solid #F6C9D3;border-radius:20px;padding:2px 9px;font-size:10.5px;font-weight:800;cursor:help;white-space:nowrap;}
+.early-chip{display:inline-block;background:var(--gb);color:#047857;border:1px solid #A7E3C3;border-radius:20px;padding:2px 9px;font-size:10.5px;font-weight:800;cursor:help;white-space:nowrap;}
+.tk-report td.cell-good{color:#047857;font-weight:800;}
+tr.row-early td{background:#EAFBF1 !important;}
+tr.row-early:hover td{background:#D6F5E3 !important;}
 .report-row-delayed td{background:var(--rb);}
 .report-row-delayed:hover td{background:#FDE1E8;}
+.report-row-early td{background:#EAFBF1;}
+.report-row-early:hover td{background:#D6F5E3;}
 
 /* Prominent status-summary panel (top-right of the header) */
 .tk-summary{display:flex;gap:8px;align-self:center;}
