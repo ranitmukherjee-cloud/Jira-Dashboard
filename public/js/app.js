@@ -1418,13 +1418,23 @@ function trackerRow(t, day) {
 
 function renderTrackerView() {
   const day = STATE.trackerDay;
-  const tasks = STATE.trackerTasks || [];
+  const allTasks = STATE.trackerTasks || [];
   const isToday = day === istToday();
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
+  // The sidebar's universal PSE filter applies here too -- selecting a PSE
+  // shows only their sheet instead of all six. The sidebar stores full Jira
+  // names ("Utkarsh Agrawal") while tracker rows use short first names
+  // ("Utkarsh"), so match by prefix rather than exact equality.
+  const pseFilter = STATE.filters.pse;
+  const matchesPseFilter = (shortName) =>
+    !pseFilter.size || [...pseFilter].some((full) => full.toLowerCase().startsWith(shortName.toLowerCase()));
+  const visiblePseRows = TRACKER_PSE_ROWS.filter(matchesPseFilter);
+  const tasks = pseFilter.size ? allTasks.filter((t) => matchesPseFilter(t.pse)) : allTasks;
+
   const overdueTotal = tasks.filter((t) => taskOverdue(t, day)).length;
 
-  const pseSections = TRACKER_PSE_ROWS.map((pse) => {
+  const pseSections = visiblePseRows.map((pse) => {
     const rows = tasks
       .filter((t) => t.pse === pse && taskVisibleOnDay(t, day))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -1450,7 +1460,7 @@ function renderTrackerView() {
         <button id="nextDayBtn">Next →</button>
         ${!isToday ? '<button id="todayBtn">Jump to Today</button>' : ''}
       </div>
-      ${pseSections}
+      ${pseSections || '<div class="empty">No PSE matches the current sidebar filter</div>'}
     </div>`;
 
   bindTrackerEvents();
