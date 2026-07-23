@@ -757,6 +757,17 @@ function renderPipeline() {
         <div class="kpi"><div class="kb" style="background:var(--r)"></div><div class="kl">Pre-Quarter Red Flags</div><div class="kv">${holdovers.length}</div><div class="ks">Started before 1 May 2026, still open</div></div>
       </div>
 
+      <div class="sh"><div class="sht">Pipeline by PSE</div><div class="shl"></div></div>
+      <div class="krow">
+        ${pseNames
+          .map((p) => {
+            const list = byPse[p];
+            const pseMrr = list.filter((i) => !isMrrMissing(i.mrr)).reduce((s, i) => s + i.mrr, 0);
+            return `<div class="kpi kpi-tint" style="--kc:var(--b)"><div class="kb" style="background:var(--b)"></div><div class="kl">${p}</div><div class="kv" style="font-size:24px">${list.length}</div><div class="ks">${fmtUsd(pseMrr)} MRR</div></div>`;
+          })
+          .join('')}
+      </div>
+
       <div class="card" style="margin-bottom:16px"><div class="ct">Active Pipeline MRR by PSE</div><div class="cs">Click a bar to see that PSE's active pipeline deals</div><div style="height:240px"><canvas id="pipelinePseChart"></canvas></div></div>
 
       <div class="sh"><div class="sht">Deals by PSE</div><div class="shl"></div><div class="shb">🔴 red rows = started before the current quarter</div></div>
