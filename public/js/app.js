@@ -21,6 +21,8 @@ const STATE = {
     currentQuarterOnly: false,
   },
   activityFilters: { pse: new Set(), status: new Set(), dealName: '', dateFrom: '', dateTo: '' },
+  trackerFilters: { pse: new Set(), status: new Set(), helpInSow: '', flagApoorv: '', dateFrom: '', dateTo: '' },
+  trackerLeave: {},
   route: { name: 'overview', param: null },
   adhoc: null,
   charts: [],
@@ -1353,6 +1355,96 @@ function addDays(dateStr, delta) {
   return dt.toISOString().slice(0, 10);
 }
 
+// 0=Sun … 6=Sat, computed in UTC on the bare date so it matches lib/tracker.js.
+function dayOfWeek(dateStr) {
+  return new Date(dateStr + 'T00:00:00Z').getUTCDay();
+}
+function isWeekendDay(dateStr) {
+  const d = dayOfWeek(dateStr);
+  return d === 0 || d === 6;
+}
+// PSEs don't work weekends, so Prev/Next step over Sat/Sun entirely.
+function stepWorkingDay(dateStr, dir) {
+  let d = addDays(dateStr, dir);
+  while (isWeekendDay(d)) d = addDays(d, dir);
+  return d;
+}
+// If today is a weekend, the tracker opens on the most recent working day.
+function lastWorkingDayOnOrBefore(dateStr) {
+  let d = dateStr;
+  while (isWeekendDay(d)) d = addDays(d, -1);
+  return d;
+}
+function mondayOfWeek(dateStr) {
+  const dow = dayOfWeek(dateStr); // 0..6, Mon=1
+  const back = dow === 0 ? 6 : dow - 1; // Sunday counts as end of the prior week
+  return addDays(dateStr, -back);
+}
+function firstMondayOfMonth(year, monthIndex) {
+  for (let day = 1; day <= 7; day++) {
+    const ds = `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    if (dayOfWeek(ds) === 1) return ds;
+  }
+  return null;
+}
+// The monthly report period runs first-Monday-of-month → day before the next
+// month's first Monday. Given any day, find which period it belongs to.
+function monthlyPeriodFor(dateStr) {
+  const [y, m] = dateStr.split('-').map(Number);
+  let startY = y;
+  let startM = m - 1; // 0-based
+  let start = firstMondayOfMonth(startY, startM);
+  if (dateStr < start) {
+    startM -= 1;
+    if (startM < 0) { startM = 11; startY -= 1; }
+    start = firstMondayOfMonth(startY, startM);
+  }
+  let nextY = startY;
+  let nextM = startM + 1;
+  if (nextM > 11) { nextM = 0; nextY += 1; }
+  const end = addDays(firstMondayOfMonth(nextY, nextM), -1);
+  return { start, end, year: startY, monthIndex: startM };
+}
+// Inclusive list of Mon–Fri working-day date strings between from and to.
+function workingDaysBetween(from, to) {
+  const days = [];
+  let d = from;
+  while (d <= to) {
+    if (!isWeekendDay(d)) days.push(d);
+    d = addDays(d, 1);
+  }
+  return days;
+}
+
+// Report windows start fresh on these dates (per spec); anything earlier just
+// shows a "not started yet" note rather than partial data.
+const WEEKLY_REPORT_START = '2026-07-27'; // Monday
+const MONTHLY_REPORT_START = '2026-08-03'; // first Monday of Aug 2026
+
+// Aggregate one PSE's completion stats across a set of working days.
+function pseStats(tasks, leave, pse, days) {
+  const dayset = new Set(days);
+  let due = 0, onTime = 0, late = 0, unmarked = 0, created = 0, completed = 0, leaveDays = 0;
+  for (const d of days) if (leave[`${pse}|${d}`]) leaveDays++;
+  for (const t of tasks) {
+    if (t.pse !== pse) continue;
+    if (t.createdDate && dayset.has(t.createdDate)) created++;
+    if (t.completedDate && dayset.has(t.completedDate)) completed++;
+    if (t.dueDate && dayset.has(t.dueDate)) {
+      due++;
+      if (t.status === 'Done') {
+        if (t.completedDate && t.completedDate <= t.dueDate) onTime++;
+        else late++;
+      } else {
+        unmarked++;
+      }
+    }
+  }
+  const done = onTime + late;
+  const rate = due ? Math.round((done / due) * 100) : null;
+  return { due, onTime, late, unmarked, created, completed, leaveDays, done, rate };
+}
+
 // Mirrors lib/tracker.js: still-open tasks carry forward to every day from
 // creation onward; once Done, the task remains visible on its start day,
 // its actual completion day, and its due day — so both ends stay on record.
@@ -1376,11 +1468,17 @@ const trackerSaveTimers = {};
 
 async function renderTracker() {
   document.getElementById('app').innerHTML = '<div class="page"><div class="loading">Loading tracker…</div></div>';
-  if (!STATE.trackerDay) STATE.trackerDay = istToday();
+  if (!STATE.trackerDay) STATE.trackerDay = lastWorkingDayOnOrBefore(istToday());
   try {
-    const res = await fetch('/api/tracker', { cache: 'no-store' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    STATE.trackerTasks = await res.json();
+    const [tasks, leave] = await Promise.all([
+      fetch('/api/tracker', { cache: 'no-store' }).then((r) => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      }),
+      fetch('/api/tracker?resource=leave', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : {})),
+    ]);
+    STATE.trackerTasks = tasks;
+    STATE.trackerLeave = leave || {};
   } catch (err) {
     document.getElementById('app').innerHTML = `<div class="page"><div class="empty">Could not load the task tracker: ${err.message}</div></div>`;
     return;
@@ -1416,51 +1514,163 @@ function trackerRow(t, day) {
     </tr>`;
 }
 
+// Which PSE sheets are visible given the tracker's own PSE filter.
+function trackerVisiblePses() {
+  const f = STATE.trackerFilters.pse;
+  return f.size ? TRACKER_PSE_ROWS.filter((p) => f.has(p)) : TRACKER_PSE_ROWS;
+}
+
+// Row-level filters (status / help-in-SOW / flag) applied within a PSE sheet.
+function trackerRowMatchesFilters(t) {
+  const f = STATE.trackerFilters;
+  if (f.status.size && !f.status.has(t.status)) return false;
+  if (f.helpInSow && String(!!t.helpInSow) !== f.helpInSow) return false;
+  if (f.flagApoorv && String(!!t.flagApoorv) !== f.flagApoorv) return false;
+  return true;
+}
+
+function reportTable(title, subtitle, tasks, leave, days, pses) {
+  const rows = pses.map((pse) => {
+    const s = pseStats(tasks, leave, pse, days);
+    const rateCls = s.rate == null ? '' : s.rate >= 80 ? 'rate-good' : s.rate >= 50 ? 'rate-mid' : 'rate-bad';
+    return `
+      <tr>
+        <td class="tk-cell"><b>${pse}</b></td>
+        <td class="tk-cell">${s.due}</td>
+        <td class="tk-cell">${s.onTime}</td>
+        <td class="tk-cell">${s.late}</td>
+        <td class="tk-cell ${s.unmarked ? 'cell-warn' : ''}">${s.unmarked}</td>
+        <td class="tk-cell">${s.leaveDays}</td>
+        <td class="tk-cell"><span class="rate-pill ${rateCls}">${s.rate == null ? '—' : s.rate + '%'}</span></td>
+      </tr>`;
+  }).join('');
+  return `
+    <div class="tc tk-report">
+      <div class="th"><span class="tht">${title}</span><span class="ths">${subtitle}</span></div>
+      <div class="tw">
+        <table>
+          <thead><tr><th>PSE</th><th>Tasks Due</th><th>On Time</th><th>Late</th><th>Unmarked</th><th>On Leave</th><th>Completion</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderTrackerReports(tasks, leave, pses, day) {
+  // Daily — the single working day being viewed.
+  const daily = reportTable(
+    'Daily Completion Result',
+    new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' }),
+    tasks, leave, [day], pses
+  );
+
+  // Weekly — Mon–Fri of the viewed week, not before the report start date.
+  const weekStart = mondayOfWeek(day);
+  let weekly;
+  if (weekStart < WEEKLY_REPORT_START) {
+    weekly = `<div class="tc tk-report"><div class="th"><span class="tht">Weekly Report</span></div><div class="tw"><div class="empty">Weekly reporting starts the week of Mon 27 Jul 2026</div></div></div>`;
+  } else {
+    const weekEnd = addDays(weekStart, 4);
+    const days = workingDaysBetween(weekStart, weekEnd);
+    const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    weekly = reportTable('Weekly Report', `Mon–Fri · ${fmt(weekStart)} – ${fmt(weekEnd)}`, tasks, leave, days, pses);
+  }
+
+  // Monthly — first-Monday-of-month period, not before the report start date.
+  const period = monthlyPeriodFor(day);
+  let monthly;
+  if (period.start < MONTHLY_REPORT_START) {
+    monthly = `<div class="tc tk-report"><div class="th"><span class="tht">Monthly Report</span></div><div class="tw"><div class="empty">Monthly reporting starts Mon 3 Aug 2026 (first Monday of the month)</div></div></div>`;
+  } else {
+    const days = workingDaysBetween(period.start, period.end);
+    const monthName = new Date(period.start + 'T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    monthly = reportTable('Monthly Report', `${monthName} · ${fmt(period.start)} – ${fmt(period.end)} (from first Monday)`, tasks, leave, days, pses);
+  }
+
+  // Optional custom-range report driven by the Date Bracket filter.
+  const { dateFrom, dateTo } = STATE.trackerFilters;
+  let custom = '';
+  if (dateFrom && dateTo && dateFrom <= dateTo) {
+    const days = workingDaysBetween(dateFrom, dateTo);
+    const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+    custom = reportTable('Custom Range Report', `${fmt(dateFrom)} – ${fmt(dateTo)} (working days only)`, tasks, leave, days, pses);
+  }
+
+  return `
+    <div class="ph" style="margin-top:26px"><div class="pht" style="font-size:15px">Completion Tracker Reports</div><div class="phs">Auto-calculated · "Unmarked" = tasks due but not marked Done · weekends excluded · leave days discounted</div></div>
+    ${daily}
+    ${custom}
+    ${weekly}
+    ${monthly}`;
+}
+
 function renderTrackerView() {
   const day = STATE.trackerDay;
   const allTasks = STATE.trackerTasks || [];
+  const leave = STATE.trackerLeave || {};
   const isToday = day === istToday();
+  const weekend = isWeekendDay(day);
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
-  // The sidebar's universal PSE filter applies here too -- selecting a PSE
-  // shows only their sheet instead of all six. The sidebar stores full Jira
-  // names ("Utkarsh Agrawal") while tracker rows use short first names
-  // ("Utkarsh"), so match by prefix rather than exact equality.
-  const pseFilter = STATE.filters.pse;
-  const matchesPseFilter = (shortName) =>
-    !pseFilter.size || [...pseFilter].some((full) => full.toLowerCase().startsWith(shortName.toLowerCase()));
-  const visiblePseRows = TRACKER_PSE_ROWS.filter(matchesPseFilter);
-  const tasks = pseFilter.size ? allTasks.filter((t) => matchesPseFilter(t.pse)) : allTasks;
+  renderTrackerSidebar();
 
-  const overdueTotal = tasks.filter((t) => taskOverdue(t, day)).length;
+  const pses = trackerVisiblePses();
+  const tasksForPse = allTasks.filter((t) => pses.includes(t.pse));
 
-  const pseSections = visiblePseRows.map((pse) => {
-    const rows = tasks
-      .filter((t) => t.pse === pse && taskVisibleOnDay(t, day))
+  const daynav = `
+    <div class="tk-daynav">
+      <button id="prevDayBtn">← Prev working day</button>
+      <div class="tk-daydate">${dayLabel}${isToday ? ' (Today)' : weekend ? ' · Weekend' : ''}</div>
+      <button id="nextDayBtn">Next working day →</button>
+      ${!isToday ? '<button id="todayBtn">Jump to Today</button>' : ''}
+    </div>`;
+
+  if (weekend) {
+    document.getElementById('app').innerHTML = `
+      <div class="page">
+        <div class="ph"><div class="pht">Daily Task Tracker</div><div class="phs">PSEs don't work Saturdays or Sundays — no tracking on this day</div></div>
+        ${daynav}
+        <div class="empty" style="margin-top:20px">🌤️ Weekend — the Product Solutions team is off. Use "Prev/Next working day" to jump to a weekday.</div>
+      </div>`;
+    bindTrackerEvents();
+    return;
+  }
+
+  const overdueTotal = tasksForPse.filter((t) => taskOverdue(t, day)).length;
+
+  const pseSections = pses.map((pse) => {
+    const onLeave = !!leave[`${pse}|${day}`];
+    const rows = tasksForPse
+      .filter((t) => t.pse === pse && taskVisibleOnDay(t, day) && trackerRowMatchesFilters(t))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     return `
-    <div class="tc">
-      <div class="th"><span class="tht">${pse}</span><span class="ths">${rows.length} task(s)</span></div>
-      <div class="tw">
+    <div class="tc ${onLeave ? 'tk-onleave' : ''}">
+      <div class="th">
+        <span class="tht">${pse}</span>
+        <span class="ths">${onLeave ? 'On Leave today' : rows.length + ' task(s)'}</span>
+        <button class="tk-leave-btn ${onLeave ? 'active' : ''}" data-leave-pse="${pse}" title="Toggle on-leave for this day">${onLeave ? '✓ On Leave' : 'Mark On Leave'}</button>
+      </div>
+      ${
+        onLeave
+          ? '<div class="tw"><div class="empty">Marked on leave for this working day</div></div>'
+          : `<div class="tw">
         <table>
           <thead><tr><th style="width:26%">Deal Name</th><th>Status</th><th>Due Date</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:20%">Blocker</th><th></th></tr></thead>
-          <tbody>${rows.map((t) => trackerRow(t, day)).join('') || '<tr><td colspan="7" class="empty">No tasks yet</td></tr>'}</tbody>
+          <tbody>${rows.map((t) => trackerRow(t, day)).join('') || '<tr><td colspan="7" class="empty">No tasks</td></tr>'}</tbody>
         </table>
       </div>
-      <div style="padding:10px 16px"><button class="tk-add" data-add-pse="${pse}">+ Add Task</button></div>
+      <div style="padding:10px 16px"><button class="tk-add" data-add-pse="${pse}">+ Add Task</button></div>`
+      }
     </div>`;
   }).join('');
 
   document.getElementById('app').innerHTML = `
     <div class="page">
       <div class="ph"><div class="pht">Daily Task Tracker</div><div class="phs">One sheet per PSE · in-progress tasks carry forward automatically until marked Done · red rows are overdue as of this day (${overdueTotal})</div></div>
-      <div class="tk-daynav">
-        <button id="prevDayBtn">← Prev</button>
-        <div class="tk-daydate">${dayLabel}${isToday ? ' (Today)' : ''}</div>
-        <button id="nextDayBtn">Next →</button>
-        ${!isToday ? '<button id="todayBtn">Jump to Today</button>' : ''}
-      </div>
-      ${pseSections || '<div class="empty">No PSE matches the current sidebar filter</div>'}
+      ${daynav}
+      ${pseSections || '<div class="empty">No PSE matches the current filter</div>'}
+      ${renderTrackerReports(tasksForPse, leave, pses, day)}
     </div>`;
 
   bindTrackerEvents();
@@ -1468,17 +1678,38 @@ function renderTrackerView() {
 
 function bindTrackerEvents() {
   document.getElementById('prevDayBtn').addEventListener('click', () => {
-    STATE.trackerDay = addDays(STATE.trackerDay, -1);
+    STATE.trackerDay = stepWorkingDay(STATE.trackerDay, -1);
     renderTrackerView();
   });
   document.getElementById('nextDayBtn').addEventListener('click', () => {
-    STATE.trackerDay = addDays(STATE.trackerDay, 1);
+    STATE.trackerDay = stepWorkingDay(STATE.trackerDay, 1);
     renderTrackerView();
   });
   const todayBtn = document.getElementById('todayBtn');
   if (todayBtn) todayBtn.addEventListener('click', () => {
-    STATE.trackerDay = istToday();
+    STATE.trackerDay = lastWorkingDayOnOrBefore(istToday());
     renderTrackerView();
+  });
+
+  document.querySelectorAll('[data-leave-pse]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const pse = btn.dataset.leavePse;
+      const key = `${pse}|${STATE.trackerDay}`;
+      const nextOnLeave = !STATE.trackerLeave[key];
+      // optimistic update
+      if (nextOnLeave) STATE.trackerLeave[key] = true;
+      else delete STATE.trackerLeave[key];
+      renderTrackerView();
+      try {
+        await fetch('/api/tracker', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resource: 'leave', pse, date: STATE.trackerDay, onLeave: nextOnLeave }),
+        });
+      } catch (err) {
+        console.error('Leave toggle failed', err);
+      }
+    });
   });
 
   document.querySelectorAll('[data-add-pse]').forEach((btn) => {
@@ -1511,6 +1742,94 @@ function bindTrackerEvents() {
       if (field === 'flagApoorv' || field === 'helpInSow') value = value === 'true';
       saveTrackerField(id, field, value, immediate);
     });
+  });
+}
+
+// Exclusive left-sidebar filters for the Daily Tracker tab: PSE, Status,
+// Date bracket, Help in SOW, Flag Apoorv (per spec — the universal Jira
+// filters don't apply here).
+function renderTrackerSidebar() {
+  if (!STATE.facc) loadSidebarPrefs();
+  const f = STATE.trackerFilters;
+  const activeCount = f.pse.size + f.status.size + (f.helpInSow ? 1 : 0) + (f.flagApoorv ? 1 : 0) + (f.dateFrom ? 1 : 0) + (f.dateTo ? 1 : 0);
+  const sb = document.getElementById('sidebar');
+  sb.style.display = '';
+  sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
+  sb.innerHTML = `
+    <div class="sb-header">
+      <div class="sb-title">Filters${activeCount ? `<span class="facc-badge">${activeCount}</span>` : ''}</div>
+      <button class="sb-toggle" id="sidebarToggleBtn" title="${STATE.sidebarCollapsed ? 'Expand filters' : 'Collapse filters'}">${STATE.sidebarCollapsed ? '»' : '«'}</button>
+    </div>
+    <div class="sb-content" id="sidebarContent" style="display:${STATE.sidebarCollapsed ? 'none' : ''}">
+      ${faccGroup('pse', 'PSE', checkboxListHtml('pse', TRACKER_PSE_ROWS, f.pse), f.pse.size)}
+      ${faccGroup('status', 'Status', checkboxListHtml('status', ['Open', 'In Progress', 'Done'], f.status), f.status.size)}
+
+      <div class="sfgroup-row">
+        <div class="sfgroup-half">
+          <label>Help in SOW</label>
+          <select class="fs" id="tkHelpSelect">
+            <option value="">All</option>
+            <option value="true" ${f.helpInSow === 'true' ? 'selected' : ''}>Yes</option>
+            <option value="false" ${f.helpInSow === 'false' ? 'selected' : ''}>No</option>
+          </select>
+        </div>
+        <div class="sfgroup-half">
+          <label>Flag Apoorv</label>
+          <select class="fs" id="tkFlagSelect">
+            <option value="">All</option>
+            <option value="true" ${f.flagApoorv === 'true' ? 'selected' : ''}>Yes</option>
+            <option value="false" ${f.flagApoorv === 'false' ? 'selected' : ''}>No</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="sfgroup">
+        <label>Date Bracket (From – To)</label>
+        <div class="sf-daterow">
+          <input type="date" class="fi" id="tkDateFrom" value="${f.dateFrom}"/>
+          <input type="date" class="fi" id="tkDateTo" value="${f.dateTo}"/>
+        </div>
+        <div style="font-size:10px;color:var(--t3)">Adds a "Custom Range" report below</div>
+      </div>
+
+      <button class="clear-btn-full" id="clearTrackerFiltersBtn">Clear all filters</button>
+    </div>`;
+
+  document.getElementById('sidebarToggleBtn').addEventListener('click', () => {
+    STATE.sidebarCollapsed = !STATE.sidebarCollapsed;
+    localStorage.setItem('psv_sidebar_collapsed', STATE.sidebarCollapsed ? '1' : '0');
+    renderTrackerSidebar();
+  });
+
+  if (STATE.sidebarCollapsed) return;
+
+  document.getElementById('tkHelpSelect').addEventListener('change', (e) => { STATE.trackerFilters.helpInSow = e.target.value; renderTrackerView(); });
+  document.getElementById('tkFlagSelect').addEventListener('change', (e) => { STATE.trackerFilters.flagApoorv = e.target.value; renderTrackerView(); });
+  document.getElementById('tkDateFrom').addEventListener('change', (e) => { STATE.trackerFilters.dateFrom = e.target.value; renderTrackerView(); });
+  document.getElementById('tkDateTo').addEventListener('change', (e) => { STATE.trackerFilters.dateTo = e.target.value; renderTrackerView(); });
+
+  document.querySelectorAll('[data-facc-toggle]').forEach((head) => {
+    head.addEventListener('click', () => {
+      const id = head.dataset.faccToggle;
+      STATE.facc[id] = !STATE.facc[id];
+      localStorage.setItem('psv_facc_' + id, STATE.facc[id] ? '1' : '0');
+      head.closest('.facc').classList.toggle('open', STATE.facc[id]);
+    });
+  });
+
+  document.querySelectorAll('#sidebar [data-mgroup]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const group = cb.dataset.mgroup;
+      const set = STATE.trackerFilters[group];
+      if (cb.checked) set.add(cb.value);
+      else set.delete(cb.value);
+      renderTrackerView();
+    });
+  });
+
+  document.getElementById('clearTrackerFiltersBtn').addEventListener('click', () => {
+    STATE.trackerFilters = { pse: new Set(), status: new Set(), helpInSow: '', flagApoorv: '', dateFrom: '', dateTo: '' };
+    renderTrackerView();
   });
 }
 
@@ -2082,7 +2401,7 @@ function render() {
   // Links or Activity Log — those routes swap the same sidebar element for
   // their own filter set instead (see renderQuickLinksSidebar /
   // renderActivitySidebar). Restore the normal Jira sidebar for every other tab.
-  if (!['links', 'activity'].includes(STATE.route.name)) renderSidebar();
+  if (!['links', 'activity', 'tracker'].includes(STATE.route.name)) renderSidebar();
 
   if (STATE.route.name === 'status') renderStatusDrilldown(STATE.route.param);
   else if (STATE.route.name === 'segment') renderSegment(STATE.route.param);

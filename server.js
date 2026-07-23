@@ -5,7 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { getLiveData } = require('./lib/live');
-const { listTasks, createTask, updateTask, deleteTask } = require('./lib/tracker');
+const { listTasks, createTask, updateTask, deleteTask, listLeave, setLeaveStatus } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
 const { listLinks, addLink, updateLink, reorderLinks, deleteLink, listGroups, createGroup, renameGroup, deleteGroup } = require('./lib/quickLinks');
 const {
@@ -107,11 +107,20 @@ app.get('/api/tracker', async (req, res) => {
     });
     return;
   }
+  if (req.query.resource === 'leave') {
+    res.json(await listLeave());
+    return;
+  }
   res.json(await listTasks());
 });
 app.post('/api/tracker', async (req, res) => {
   try {
-    res.status(201).json(await createTask(req.body || {}));
+    const body = req.body || {};
+    if (body.resource === 'leave') {
+      res.json(await setLeaveStatus(body.pse, body.date, !!body.onLeave));
+      return;
+    }
+    res.status(201).json(await createTask(body));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

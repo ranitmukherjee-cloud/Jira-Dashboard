@@ -203,6 +203,20 @@ tr.row-flagged:hover td{background:#FDE1E8 !important;}
 .tk-del:hover{background:var(--rb);color:var(--r);}
 td.tk-cell{padding:2px 4px;}
 
+/* On-Leave toggle + report tables (Daily Tracker tab only) */
+.tk-leave-btn{margin-left:auto;background:var(--w);border:1.5px solid var(--bdr2);border-radius:7px;padding:5px 11px;font-size:11px;font-weight:700;color:var(--t2);cursor:pointer;transition:all .15s;}
+.tk-leave-btn:hover{border-color:var(--a);color:var(--a);background:var(--ab);}
+.tk-leave-btn.active{background:var(--a);border-color:var(--a);color:#fff;}
+.tc.tk-onleave{opacity:.82;}
+.tc.tk-onleave .th{background:var(--ab);}
+.tk-report{margin-bottom:16px;}
+.tk-report th{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;}
+.tk-report td.cell-warn{color:var(--r);font-weight:800;}
+.rate-pill{display:inline-block;min-width:44px;text-align:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:800;background:var(--nl);color:var(--t2);}
+.rate-pill.rate-good{background:var(--gb);color:var(--g);}
+.rate-pill.rate-mid{background:var(--ab);color:var(--a);}
+.rate-pill.rate-bad{background:var(--rb);color:var(--r);}
+
 /* QUICK LINKS — scoped exclusively to this tab, no other tab uses these classes */
 /* Sidebar-hosted group filter (reuses the main sidebar's collapsible shell) */
 .ql-filter-list{display:flex;flex-direction:column;gap:6px;}

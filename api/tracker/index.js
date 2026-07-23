@@ -1,4 +1,4 @@
-const { listTasks, createTask } = require('../../lib/tracker');
+const { listTasks, createTask, listLeave, setLeaveStatus } = require('../../lib/tracker');
 const { USE_REDIS, initError } = require('../../lib/trackerStore');
 
 module.exports = async (req, res) => {
@@ -19,11 +19,22 @@ module.exports = async (req, res) => {
         });
         return;
       }
+      // Leave map folded into this route too (same function-cap reason).
+      if (req.query.resource === 'leave') {
+        res.status(200).json(await listLeave());
+        return;
+      }
       res.status(200).json(await listTasks());
       return;
     }
     if (req.method === 'POST') {
-      const task = await createTask(req.body || {});
+      const body = req.body || {};
+      if (body.resource === 'leave') {
+        const map = await setLeaveStatus(body.pse, body.date, !!body.onLeave);
+        res.status(200).json(map);
+        return;
+      }
+      const task = await createTask(body);
       res.status(201).json(task);
       return;
     }
