@@ -1618,60 +1618,51 @@ function workingDaysBetween(from, to) {
 const WEEKLY_REPORT_START = '2026-07-27'; // Monday
 const MONTHLY_REPORT_START = '2026-08-03'; // first Monday of Aug 2026
 
-// Aggregate one PSE's completion stats across a set of working days, bucketed
-// by each task's LOCKED committed due date and its signed Days Remaining:
-// early (+, finished ahead), on-time (0), late (−, finished/running behind).
-// Early and late tasks are collected with names + day counts for hover tooltips.
+// Aggregate one PSE's stats across a set of working days, bucketed by each
+// task's (flexible) due date: completed, still-pending, and delayed (finished
+// after due, or still open past due). Delayed tasks are collected with names +
+// working-day overrun for the hover tooltip.
 function pseStats(tasks, leave, pse, days, referenceDay = istToday()) {
   const dayset = new Set(days);
-  let due = 0, early = 0, onTime = 0, delayed = 0, unmarked = 0, created = 0, completed = 0, leaveDays = 0, extraDaysTotal = 0, earlyDaysTotal = 0;
+  let due = 0, doneCount = 0, delayed = 0, unmarked = 0, created = 0, completed = 0, leaveDays = 0, extraDaysTotal = 0;
   const delayedList = [];
-  const earlyList = [];
   for (const d of days) if (leave[`${pse}|${d}`]) leaveDays++;
   for (const t of tasks) {
     if (t.pse !== pse) continue;
-    if (t.createdDate && dayset.has(t.createdDate)) created++;
+    if (t.taskStartDate && dayset.has(t.taskStartDate)) created++;
     if (t.completedDate && dayset.has(t.completedDate)) completed++;
-    const committed = committedDue(t);
-    if (committed && dayset.has(committed)) {
+    if (t.dueDate && dayset.has(t.dueDate)) {
       due++;
-      const rem = daysRemaining(t, referenceDay);
-      if (rem != null && rem < 0) {
-        // finished late, or still open past its committed date
+      if (t.status === 'Done') doneCount++;
+      else unmarked++;
+      const late = taskDelayDays(t, referenceDay);
+      if (late > 0) {
         delayed++;
-        extraDaysTotal += -rem;
-        delayedList.push({ name: t.dealName || '(unnamed task)', d: rem });
-      } else if (t.status === 'Done' && rem > 0) {
-        early++;
-        earlyDaysTotal += rem;
-        earlyList.push({ name: t.dealName || '(unnamed task)', d: rem });
-      } else if (t.status === 'Done' && rem === 0) {
-        onTime++;
+        extraDaysTotal += late;
+        delayedList.push({ name: t.dealName || '(unnamed task)', d: late });
       }
-      if (t.status !== 'Done') unmarked++;
     }
   }
-  const doneCount = tasks.filter((t) => t.pse === pse && committedDue(t) && dayset.has(committedDue(t)) && t.status === 'Done').length;
   const rate = due ? Math.round((doneCount / due) * 100) : null;
-  return { due, early, onTime, delayed, unmarked, created, completed, leaveDays, extraDaysTotal, earlyDaysTotal, delayedList, earlyList, rate };
+  return { due, doneCount, delayed, unmarked, created, completed, leaveDays, extraDaysTotal, delayedList, rate };
 }
 
-// Mirrors lib/tracker.js: still-open tasks carry forward to every day from
-// creation onward; once Done, the task remains visible on its start day,
-// its actual completion day, and its due day — so both ends stay on record.
+// Mirrors lib/tracker.js. Visibility is anchored on the editable Task Start
+// Date (fallback: creation date). A task recurs on every day from its start
+// date onward; changing the start date shifts it onto that day's page. Once
+// Done it's pinned to its start, completion, and due days.
+function taskStart(task) {
+  return task.taskStartDate || task.createdDate;
+}
 function taskVisibleOnDay(task, day) {
-  if (task.createdDate > day) return false;
+  const start = taskStart(task);
+  if (start > day) return false;
   if (task.status === 'Done') {
-    return day === task.createdDate || day === task.completedDate || day === task.dueDate;
+    return day === start || day === task.completedDate || day === task.dueDate;
   }
   return true;
 }
 
-// The hard-coded initial commitment. Falls back to the current dueDate for
-// legacy tasks created before committedDueDate existed.
-function committedDue(task) {
-  return task.committedDueDate || task.dueDate || null;
-}
 function daysBetween(fromStr, toStr) {
   return Math.round((Date.parse(toStr + 'T00:00:00Z') - Date.parse(fromStr + 'T00:00:00Z')) / 86400000);
 }
@@ -1688,33 +1679,18 @@ function workingDaysAfter(from, to) {
   return count;
 }
 
-// Signed "Days Remaining" against the locked committed due date, in WORKING
-// days (weekends + official holidays excluded):
-//   > 0  → days still left (in-progress) OR finished that many days EARLY (Done)
-//   = 0  → due today / finished exactly on time
-//   < 0  → overdue by that many days (in-progress) OR finished that many LATE (Done)
-// Once a task is Done the value freezes (measured to its completion date).
-function daysRemaining(task, referenceDay = istToday()) {
-  const committed = committedDue(task);
-  if (!committed) return null;
-  const ref = task.status === 'Done' ? task.completedDate || referenceDay : referenceDay;
-  if (committed >= ref) return workingDaysAfter(ref, committed); // days left / early
-  return -workingDaysAfter(committed, ref); // overdue / late
-}
-// How many working days late (0 if not late) — kept for report aggregation.
+// Working days late against the CURRENT (flexible) due date — 0 if on time or
+// no due date. For a Done task, measured to its completion; for an open task,
+// to the reference day.
 function taskDelayDays(task, referenceDay = istToday()) {
-  const r = daysRemaining(task, referenceDay);
-  return r != null && r < 0 ? -r : 0;
+  const due = task.dueDate;
+  if (!due) return 0;
+  const endRef = task.status === 'Done' ? task.completedDate || referenceDay : referenceDay;
+  return workingDaysAfter(due, endRef);
 }
-// Red iff negative Days Remaining (overdue or finished late).
+// Red iff the task is past its (current) due date and not finished on time.
 function taskOverdue(task, referenceDay = istToday()) {
-  const r = daysRemaining(task, referenceDay);
-  return r != null && r < 0;
-}
-// Green iff a Done task finished early (positive Days Remaining).
-function taskEarlyDone(task, referenceDay = istToday()) {
-  const r = daysRemaining(task, referenceDay);
-  return task.status === 'Done' && r != null && r > 0;
+  return taskDelayDays(task, referenceDay) > 0;
 }
 
 const trackerSaveTimers = {};
@@ -1742,41 +1718,20 @@ async function renderTracker() {
 }
 
 function trackerRow(t, day) {
-  const committed = committedDue(t);
-  const rem = daysRemaining(t, day); // null if no committed date yet
-  const overdue = rem != null && rem < 0;
-  const early = t.status === 'Done' && rem != null && rem > 0;
-  const rowCls = overdue ? 'row-flagged' : early ? 'row-early' : '';
+  const overdue = taskOverdue(t, day);
+  const rowCls = overdue ? 'row-flagged' : '';
   const statusCls = 'tk-status-' + (t.status || 'Open').toLowerCase().replace(/\s+/g, '-');
-
-  // The committed due date is locked once set — shown read-only ("hard blocked")
-  // so it stays a fixed record. It's only editable on the very first entry.
-  const dueCell = committed
-    ? `<input class="tk-input tk-due-locked" type="date" value="${committed}" disabled title="Committed due date — locked" /><span class="tk-lock" title="Locked committed due date">🔒</span>`
-    : `<input class="tk-input" type="date" data-field="dueDate" value="${t.dueDate || ''}" title="Set the committed due date (locks once saved)"/>`;
-
-  let remCell;
-  if (rem == null) {
-    remCell = '<span class="tk-ontime">—</span>';
-  } else {
-    const sign = rem > 0 ? `+${rem}` : `${rem}`;
-    const cls = rem < 0 ? 'rem-late' : rem > 0 ? 'rem-early' : 'rem-ontime';
-    const state = t.status === 'Done'
-      ? (rem > 0 ? `finished ${rem} working day(s) early` : rem < 0 ? `finished ${-rem} working day(s) late` : 'finished on time')
-      : (rem > 0 ? `${rem} working day(s) left` : rem < 0 ? `${-rem} working day(s) overdue` : 'due today');
-    remCell = `<span class="rem-chip ${cls}" title="Committed due ${committed} — ${state}">${sign}</span>`;
-  }
 
   return `
     <tr data-id="${t.id}" class="${rowCls}">
       <td class="tk-cell tk-cell-name"><textarea class="tk-input tk-textarea" data-field="dealName" rows="1" placeholder="Task name…">${escapeHtml(t.dealName || '')}</textarea></td>
+      <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" data-field="taskStartDate" value="${taskStart(t) || ''}" title="Task Start Date — the task appears from this day onward; change it to move the task to another day"/></td>
       <td class="tk-cell">
         <select class="tk-select tk-select-status ${statusCls}" data-field="status">
           ${['Open', 'In Progress', 'Done'].map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
       </td>
-      <td class="tk-cell tk-cell-due">${dueCell}</td>
-      <td class="tk-cell tk-cell-rem">${remCell}</td>
+      <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" data-field="dueDate" value="${t.dueDate || ''}" title="Due date (editable)"/></td>
       <td class="tk-cell">
         <select class="tk-select tk-select-yn ${t.flagApoorv ? 'yn-yes' : 'yn-no'}" data-field="flagApoorv">
           <option value="false" ${!t.flagApoorv ? 'selected' : ''}>No</option>
@@ -1814,21 +1769,15 @@ function reportTable(title, subtitle, tasks, leave, days, pses) {
   const rows = pses.map((pse) => {
     const s = pseStats(tasks, leave, pse, days, refDay);
     const rateCls = s.rate == null ? '' : s.rate >= 80 ? 'rate-good' : s.rate >= 50 ? 'rate-mid' : 'rate-bad';
-    // Hover tooltips naming each early / delayed task and its ± day count.
-    const delayedTip = s.delayedList.length ? escapeAttr(s.delayedList.map((x) => `${x.name} (${x.d}d)`).join(', ')) : '';
-    const earlyTip = s.earlyList.length ? escapeAttr(s.earlyList.map((x) => `${x.name} (+${x.d}d)`).join(', ')) : '';
-    const earlyCell = s.early
-      ? `<span class="early-chip" title="Early tasks — ${earlyTip}">${s.early} · +${s.earlyDaysTotal}d</span>`
-      : '0';
+    const delayedTip = s.delayedList.length ? escapeAttr(s.delayedList.map((x) => `${x.name} (${x.d}d late)`).join(', ')) : '';
     const delayedCell = s.delayed
-      ? `<span class="delay-chip" title="Delayed tasks — ${delayedTip}">${s.delayed} · -${s.extraDaysTotal}d</span>`
+      ? `<span class="delay-chip" title="Delayed tasks — ${delayedTip}">${s.delayed} · ${s.extraDaysTotal}d</span>`
       : '0';
     return `
-      <tr class="${s.delayed ? 'report-row-delayed' : s.early ? 'report-row-early' : ''}">
+      <tr class="${s.delayed ? 'report-row-delayed' : ''}">
         <td class="tk-cell"><b>${pse}</b></td>
         <td class="tk-cell">${s.due}</td>
-        <td class="tk-cell ${s.early ? 'cell-good' : ''}">${earlyCell}</td>
-        <td class="tk-cell">${s.onTime}</td>
+        <td class="tk-cell">${s.doneCount}</td>
         <td class="tk-cell ${s.delayed ? 'cell-warn' : ''}">${delayedCell}</td>
         <td class="tk-cell ${s.unmarked ? 'cell-warn' : ''}">${s.unmarked}</td>
         <td class="tk-cell">${s.leaveDays}</td>
@@ -1840,7 +1789,7 @@ function reportTable(title, subtitle, tasks, leave, days, pses) {
       <div class="th"><span class="tht">${title}</span><span class="ths">${subtitle}</span></div>
       <div class="tw">
         <table>
-          <thead><tr><th>PSE</th><th>Tasks Due</th><th title="Finished ahead of the committed due date — hover to see which">Early</th><th>On Time</th><th title="Missed the committed due date — hover to see which">Delayed</th><th>Unmarked</th><th>On Leave</th><th>Completion</th></tr></thead>
+          <thead><tr><th>PSE</th><th>Tasks Due</th><th>Completed</th><th title="Finished after the due date, or still open past it — hover to see which">Delayed</th><th>Unmarked</th><th>On Leave</th><th>Completion</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -1972,7 +1921,7 @@ function renderTrackerView() {
           ? '<div class="tw"><div class="empty">Marked on leave for this working day</div></div>'
           : `<div class="tw">
         <table class="tk-table">
-          <thead><tr><th style="width:34%">Task Name</th><th>Status</th><th>Due Date</th><th title="Working days left until the committed due date; negative = late, positive = early">Days Remaining</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:24%">Blocker</th><th></th></tr></thead>
+          <thead><tr><th style="width:30%">Task Name</th><th title="The task appears from this day onward; change it to move the task to another day's page">Task Start Date</th><th>Status</th><th>Due Date</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:22%">Blocker</th><th></th></tr></thead>
           <tbody>${rows.map((t) => trackerRow(t, day)).join('') || '<tr><td colspan="8" class="empty">No tasks</td></tr>'}</tbody>
         </table>
       </div>
