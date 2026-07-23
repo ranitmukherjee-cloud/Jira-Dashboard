@@ -197,6 +197,13 @@ tr.row-flagged:hover td{background:#FDE1E8 !important;}
 .tk-del:hover{background:var(--rb);color:var(--r);}
 td.tk-cell{padding:2px 4px;}
 
+/* QUICK LINKS */
+.link-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:22px;}
+.link-card{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--w);border:1px solid var(--bdr);border-radius:11px;padding:15px 16px;box-shadow:var(--e1);text-decoration:none;color:var(--t1);font-size:13px;font-weight:700;transition:box-shadow .15s,transform .15s,border-color .15s;}
+.link-card:hover{box-shadow:var(--e2);transform:translateY(-2px);border-color:var(--b20);color:var(--b);}
+.link-card-arrow{color:var(--t3);font-size:14px;flex-shrink:0;}
+.link-card:hover .link-card-arrow{color:var(--b);}
+
 .empty{padding:32px;text-align:center;color:var(--t3);font-size:12.5px;}
 .loading{padding:60px;text-align:center;color:var(--t3);}
 

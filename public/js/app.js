@@ -119,7 +119,7 @@ function parseRoute() {
   const [name, param] = hash.split('/');
   if (name === 'status' && param) return { name: 'status', param: decodeURIComponent(param) };
   if (name === 'segment' && param) return { name: 'segment', param: decodeURIComponent(param) };
-  if (['activity', 'mrr', 'closing', 'tat', 'team', 'pipeline', 'c3m', 'tracker', 'list'].includes(name)) {
+  if (['activity', 'mrr', 'closing', 'tat', 'team', 'pipeline', 'c3m', 'tracker', 'list', 'links'].includes(name)) {
     return { name, param: null };
   }
   return { name: 'overview', param: null };
@@ -1424,6 +1424,53 @@ async function saveTrackerField(id, field, value, rerenderAfterSave) {
   else trackerSaveTimers[id + field] = setTimeout(doSave, 500);
 }
 
+// ---------- Quick Links tab ----------
+// A simple static reference list — add entries here as they're shared.
+// Optional "group" clusters related links under the same heading.
+const QUICK_LINKS = [
+  // { name: 'Solutioning SOP', url: 'https://...', group: 'Process Docs' },
+];
+
+function renderQuickLinks() {
+  if (!QUICK_LINKS.length) {
+    document.getElementById('app').innerHTML = `
+      <div class="page">
+        <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div></div>
+        <div class="empty">No links added yet — share a name and URL and it'll show up here.</div>
+      </div>`;
+    return;
+  }
+
+  const groups = {};
+  QUICK_LINKS.forEach((l) => {
+    const g = l.group || 'Links';
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(l);
+  });
+
+  document.getElementById('app').innerHTML = `
+    <div class="page">
+      <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div></div>
+      ${Object.entries(groups)
+        .map(
+          ([group, links]) => `
+        <div class="sh"><div class="sht">${group}</div><div class="shl"></div></div>
+        <div class="link-grid">
+          ${links
+            .map(
+              (l) => `
+            <a class="link-card" href="${l.url}" target="_blank" rel="noopener">
+              <span class="link-card-name">${l.name}</span>
+              <span class="link-card-arrow">↗</span>
+            </a>`
+            )
+            .join('')}
+        </div>`
+        )
+        .join('')}
+    </div>`;
+}
+
 // ---------- card modal ----------
 function openCardModal(key) {
   const issue = STATE.data.issues.find((i) => i.key === key);
@@ -1509,6 +1556,7 @@ function render() {
   else if (STATE.route.name === 'pipeline') renderPipeline();
   else if (STATE.route.name === 'c3m') renderC3m();
   else if (STATE.route.name === 'tracker') renderTracker();
+  else if (STATE.route.name === 'links') renderQuickLinks();
   else renderOverview();
 }
 
