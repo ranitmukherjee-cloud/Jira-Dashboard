@@ -1458,12 +1458,22 @@ function renderQuickLinks() {
     if (!groups[g]) groups[g] = [];
     groups[g].push(l);
   });
+  const groupNames = Object.keys(groups);
+  if (!STATE.quickLinksFilter || !['all', ...groupNames].includes(STATE.quickLinksFilter)) {
+    STATE.quickLinksFilter = 'all';
+  }
+  const visibleGroups = STATE.quickLinksFilter === 'all' ? groupNames : [STATE.quickLinksFilter];
 
   document.getElementById('app').innerHTML = `
     <div class="page">
       <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div></div>
-      ${Object.entries(groups)
-        .map(([group, links]) => {
+      <div class="link-filter-bar">
+        <button class="link-filter-pill ${STATE.quickLinksFilter === 'all' ? 'active' : ''}" data-qlf="all">All</button>
+        ${groupNames.map((g) => `<button class="link-filter-pill ${STATE.quickLinksFilter === g ? 'active' : ''}" data-qlf="${escapeAttr(g)}">${g}</button>`).join('')}
+      </div>
+      ${visibleGroups
+        .map((group) => {
+          const links = groups[group];
           const highlighted = group !== 'Links'; // named groups (e.g. "Solutions Team Decks") stand out
           return `
         <div class="link-group ${highlighted ? 'highlight' : ''}">
@@ -1486,6 +1496,13 @@ function renderQuickLinks() {
         })
         .join('')}
     </div>`;
+
+  document.querySelectorAll('[data-qlf]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      STATE.quickLinksFilter = btn.dataset.qlf;
+      renderQuickLinks();
+    });
+  });
 }
 
 // ---------- card modal ----------
@@ -1561,6 +1578,10 @@ function render() {
   document.querySelectorAll('.nt').forEach((t) => t.classList.remove('active'));
   const navName = ['status', 'segment', 'list'].includes(STATE.route.name) ? 'overview' : STATE.route.name;
   document.querySelector(`.nt[data-route="${navName}"]`)?.classList.add('active');
+
+  // The universal Jira filters (PSE, Status, KAM, etc.) don't apply to the
+  // static Quick Links page, so the sidebar is hidden there entirely.
+  document.getElementById('sidebar').style.display = STATE.route.name === 'links' ? 'none' : '';
 
   if (STATE.route.name === 'status') renderStatusDrilldown(STATE.route.param);
   else if (STATE.route.name === 'segment') renderSegment(STATE.route.param);
