@@ -23,6 +23,8 @@ const STATE = {
   activityFilters: { pse: new Set(), status: new Set(), dealName: '', dateFrom: '', dateTo: '' },
   trackerFilters: { pse: new Set(), status: new Set(), helpInSow: '', flagApoorv: '', dateFrom: '', dateTo: '' },
   trackerLeave: {},
+  tatFilters: { pse: new Set(), status: new Set(), health: new Set() },
+  tatBox: 'all',
   route: { name: 'overview', param: null },
   adhoc: null,
   charts: [],
@@ -164,6 +166,29 @@ function tatSeverityBadge(days) {
   if (days == null) return '—';
   const meta = TAT_SEVERITY_META[tatSeverity(days)];
   return `<span class="bd ${meta.cls}">${meta.label} · ${days}d</span>`;
+}
+
+// TAT tab health bands (active deals only): Good ≤30, Mid 31–60, Review ≥61.
+const TAT_ACTIVE_STATUSES = ['Req. Gathering', 'Solution Design', 'Pending On Client', 'Solutions Draft Shared'];
+const TAT_POST_CLOSURE_STATUS = 'Solutioning (Post closure)';
+const PENDING_ON_CLIENT = 'Pending On Client';
+
+function tatHealth(days) {
+  if (days == null) return null;
+  if (days <= 30) return 'good';
+  if (days <= 60) return 'mid';
+  return 'review';
+}
+const TAT_HEALTH_META = {
+  good: { label: 'Good', cls: 'bg', color: '#12B76A' },
+  mid: { label: 'Mid', cls: 'ba', color: '#D97706' },
+  review: { label: 'Review', cls: 'br', color: '#DC2626' },
+};
+function tatHealthBadge(days) {
+  const h = tatHealth(days);
+  if (!h) return '<span class="bd bgy">—</span>';
+  const m = TAT_HEALTH_META[h];
+  return `<span class="bd ${m.cls}">${days}d · ${m.label}</span>`;
 }
 
 function avg(nums) {
@@ -753,7 +778,7 @@ function renderPipeline() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Active Pipeline</div><div class="phs">Req. Gathering · Internal Sign-off ("Solution Design") · Pending On Client · Solutions Draft Shared · COMMERCIALS · Solutioning (Post closure) — not yet closed. Use "Current quarter only" in the sidebar to hide pre-quarter holdovers.</div></div>
+      <div class="ph"><div class="pht">Active Pipeline</div><div class="phs">Req. Gathering · Solution Design · Pending On Client · Solutions Draft Shared · COMMERCIALS · Solutioning (Post closure) — not yet closed. Use "Current quarter only" in the sidebar to hide pre-quarter holdovers.</div></div>
       <div class="krow">
         <div class="kpi"><div class="kb"></div><div class="kl">Active Pipeline Deals</div><div class="kv">${rows.length}</div><div class="ks">Matching current filters</div></div>
         <div class="kpi"><div class="kb" style="background:var(--g)"></div><div class="kl">Total MRR</div><div class="kv" style="font-size:22px">${fmtUsd(totalMrr)}</div><div class="ks">Across ${valid.length} deals with MRR set</div></div>
@@ -1021,107 +1046,265 @@ function renderClosingSoon() {
 }
 
 // ---------- TAT tab ----------
-function renderTat() {
-  const allFiltered = applyFilters(STATE.data.issues);
-  const started = allFiltered.filter((i) => i.tatDays != null);
-  const completed = started.filter((i) => i.tatStatus === 'completed');
-  const running = started.filter((i) => i.tatStatus === 'in_progress');
-  const notStartedCount = allFiltered.filter((i) => i.tatStatus === 'not_started').length;
-  const flagged = started.filter((i) => tatSeverity(i.tatDays) === 'flagged').sort((a, b) => b.tatDays - a.tatDays);
-
-  const avgCompleted = avg(completed.map((i) => i.tatDays));
-  const avgRunning = avg(running.map((i) => i.tatDays));
-  const avgHold = avg(started.map((i) => i.tatHoldDays || 0));
-
-  const byPse = {};
-  started.forEach((i) => {
-    if (!byPse[i.assignee]) byPse[i.assignee] = [];
-    byPse[i.assignee].push(i);
+// Only PSE/Status/Health matter here — the TAT tab has its own exclusive
+// sidebar, not the universal Jira filter set.
+function applyTatFilters(list) {
+  const f = STATE.tatFilters;
+  return list.filter((i) => {
+    if (f.pse.size && !f.pse.has(i.assignee)) return false;
+    if (f.status.size && !f.status.has(i.status)) return false;
+    if (f.health.size && !f.health.has(tatHealth(i.tatDays))) return false;
+    return true;
   });
+}
+
+function tatDealRow(i) {
+  const inHold = i.status === PENDING_ON_CLIENT;
+  return `
+    <tr data-key="${i.key}">
+      <td><a class="jira-key-link" href="${i.url}" target="_blank" rel="noopener" title="Open ${i.key} in Jira">${i.key} ↗</a></td>
+      <td>${i.summary || ''}</td>
+      <td>${i.assignee}</td>
+      <td>${fbadge(i.status)}</td>
+      <td>${i.tatStartDate ? new Date(i.tatStartDate).toLocaleDateString('en-IN') : '—'}</td>
+      <td>${i.tatHoldDays ? `<span class="bd ba">${i.tatHoldDays}d${inHold ? ' · ongoing' : ''}</span>` : '—'}</td>
+      <td>${i.tatDays != null ? i.tatDays + 'd' : '—'}</td>
+      <td>${tatHealthBadge(i.tatDays)}</td>
+    </tr>`;
+}
+
+function tatDealTable(list, emptyMsg) {
+  return `
+    <div class="tc">
+      <div class="tw">
+        <table>
+          <thead><tr><th>Key</th><th>Client</th><th>PSE</th><th>Status</th><th>Sol. Start</th><th>Client Hold</th><th>Active TAT</th><th>Health</th></tr></thead>
+          <tbody>${list.map(tatDealRow).join('') || `<tr><td colspan="8" class="empty">${emptyMsg}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderTat() {
+  renderTatSidebar();
+
+  const issues = STATE.data.issues;
+  const isActiveStatus = (i) => TAT_ACTIVE_STATUSES.includes(i.status);
+
+  // Q1 FY26-27 active deals: an active status + Solutioning Start on/after 1 May 2026.
+  const quarterActive = issues.filter((i) => isActiveStatus(i) && i.solutioningStartDate && i.solutioningStartDate >= QUARTER_START);
+  // Pre-quarter but still ongoing: started before 1 May 2026, no SoW Send yet, active status.
+  const preQuarterOngoing = issues.filter((i) => isActiveStatus(i) && i.solutioningStartDate && i.solutioningStartDate < QUARTER_START && !i.sowSendDate);
+  // Active status but no Solutioning Start Date yet — can't compute TAT.
+  const noStart = issues.filter((i) => isActiveStatus(i) && !i.solutioningStartDate);
+  // Solutioning (Post closure) — tracked separately, exclusive from active TAT.
+  const postClosure = issues.filter((i) => i.status === TAT_POST_CLOSURE_STATUS);
+
+  // Sidebar PSE/Status filters scope the whole active view; health boxes are computed from that scope.
+  const scoped = applyTatFilters(quarterActive.filter((i) => {
+    const f = STATE.tatFilters;
+    if (f.pse.size && !f.pse.has(i.assignee)) return false;
+    if (f.status.size && !f.status.has(i.status)) return false;
+    return true;
+  }));
+
+  const good = scoped.filter((i) => tatHealth(i.tatDays) === 'good');
+  const mid = scoped.filter((i) => tatHealth(i.tatDays) === 'mid');
+  const review = scoped.filter((i) => tatHealth(i.tatDays) === 'review');
+  const inHold = scoped.filter((i) => i.status === PENDING_ON_CLIENT);
+  const avgActive = avg(scoped.map((i) => i.tatDays).filter((d) => d != null));
+  const avgHold = avg(scoped.map((i) => i.tatHoldDays || 0));
+
+  const boxes = [
+    { id: 'all', label: 'Active Q1 Deals', value: scoped.length, sub: 'Since 1 May 2026', color: 'var(--b)' },
+    { id: 'good', label: 'Good (≤30d)', value: good.length, sub: 'Healthy', color: '#12B76A' },
+    { id: 'mid', label: 'Mid (31–60d)', value: mid.length, sub: 'Watch', color: '#D97706' },
+    { id: 'review', label: 'Review (≥61d)', value: review.length, sub: 'Needs attention', color: '#DC2626' },
+    { id: 'hold', label: 'In Client Hold', value: inHold.length, sub: 'Currently Pending On Client', color: 'var(--pu)' },
+  ];
+
+  // Which list the selected value box shows.
+  const boxList = {
+    all: scoped,
+    good, mid, review,
+    hold: inHold,
+  }[STATE.tatBox] || scoped;
+  const detail = applyTatFilters(boxList).slice().sort((a, b) => (b.tatDays ?? 0) - (a.tatDays ?? 0));
+  const boxLabel = (boxes.find((b) => b.id === STATE.tatBox) || boxes[0]).label;
+
+  // Per-PSE active averages (dynamic, colored by the average's own health band).
+  const byPse = {};
+  scoped.forEach((i) => { (byPse[i.assignee] = byPse[i.assignee] || []).push(i); });
   const pseNames = Object.keys(byPse).sort((a, b) => byPse[b].length - byPse[a].length);
-  const avgByPseEntries = pseNames
-    .map((p) => [p, avg(byPse[p].filter((i) => i.tatStatus === 'completed').map((i) => i.tatDays))])
+  const avgByPse = pseNames
+    .map((p) => [p, avg(byPse[p].map((i) => i.tatDays).filter((d) => d != null))])
     .filter((e) => e[1] != null)
     .sort((a, b) => a[1] - b[1]);
 
-  const dealRow = (i) => `
-    <tr data-key="${i.key}">
-      <td style="color:var(--b);font-weight:700">${i.key}</td>
-      <td>${i.summary || ''}</td>
-      <td>${fbadge(i.status)}</td>
-      <td>${i.assignee}</td>
-      <td>${i.tatStartDate ? new Date(i.tatStartDate).toLocaleDateString('en-IN') : '—'}</td>
-      <td>${i.tatEndDate ? new Date(i.tatEndDate).toLocaleDateString('en-IN') : i.tatStatus === 'in_progress' ? '<span style="color:var(--t3)">ongoing</span>' : '—'}</td>
-      <td>${i.tatHoldDays ? `<span class="bd ba">${i.tatHoldDays}d</span>` : '—'}</td>
-      <td>${tatSeverityBadge(i.tatDays)}</td>
-    </tr>`;
-
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">TAT (Turnaround Time)</div><div class="phs">Solutioning Start Date → SoW Send Date, excluding any time spent in "Pending On Client" · Great ≤15d · Mid ≤30d · Watch ≤60d · Flagged &gt;60d</div></div>
+      <div class="ph"><div class="pht">TAT (Turnaround Time)</div><div class="phs">Active TAT for FY26-27 Q1 (Solutioning Start ≥ 1 May 2026) · statuses: Req. Gathering · Solution Design · Pending On Client · Solutions Draft Shared · client hold time excluded · live from Jira · Good ≤30d · Mid 31–60d · Review ≥61d</div></div>
+
+      <div class="krow tat-boxes">
+        ${boxes.map((b) => `
+          <div class="kpi tat-box ${STATE.tatBox === b.id ? 'active' : ''}" data-box="${b.id}">
+            <div class="kb" style="background:${b.color}"></div>
+            <div class="kl">${b.label}</div>
+            <div class="kv">${b.value}</div>
+            <div class="ks">${b.sub}</div>
+          </div>`).join('')}
+      </div>
+
       <div class="krow">
-        <div class="kpi"><div class="kb" style="background:var(--g)"></div><div class="kl">Avg TAT (Completed)</div><div class="kv">${avgCompleted ?? '—'}${avgCompleted != null ? 'd' : ''}</div><div class="ks">Across ${completed.length} completed deals</div></div>
-        <div class="kpi"><div class="kb" style="background:var(--b)"></div><div class="kl">Avg TAT (Running)</div><div class="kv">${avgRunning ?? '—'}${avgRunning != null ? 'd' : ''}</div><div class="ks">Across ${running.length} in-progress deals</div></div>
-        <div class="kpi"><div class="kb" style="background:var(--a)"></div><div class="kl">Avg Client Hold</div><div class="kv">${avgHold ?? '—'}${avgHold != null ? 'd' : ''}</div><div class="ks">Time excluded (Pending On Client)</div></div>
-        <div class="kpi"><div class="kb" style="background:var(--r)"></div><div class="kl">Flagged &gt;60d</div><div class="kv">${flagged.length}</div><div class="ks">Needs attention</div></div>
-        <div class="kpi"><div class="kb"></div><div class="kl">TAT Not Started</div><div class="kv">${notStartedCount}</div><div class="ks">No Solutioning Start Date yet</div></div>
+        <div class="kpi"><div class="kb" style="background:var(--b)"></div><div class="kl">Avg Active TAT</div><div class="kv">${avgActive ?? '—'}${avgActive != null ? 'd' : ''}</div><div class="ks">Across ${scoped.length} active deals</div></div>
+        <div class="kpi"><div class="kb" style="background:var(--a)"></div><div class="kl">Avg Client Hold Excluded</div><div class="kv">${avgHold ?? '—'}${avgHold != null ? 'd' : ''}</div><div class="ks">Pending On Client time removed</div></div>
       </div>
 
-      <div class="card" style="margin-bottom:16px"><div class="ct">Average Completed TAT by PSE</div><div class="cs">Lower is better (days) · click a bar</div><div style="height:240px"><canvas id="tatPseChart"></canvas></div></div>
+      <div class="card" style="margin-bottom:16px"><div class="ct">Average Active TAT by PSE</div><div class="cs">Lower is better (days) · colored by health · click a bar to filter that PSE</div><div style="height:${hBarHeight(avgByPse.length)}px"><canvas id="tatPseChart"></canvas></div></div>
 
-      <div class="ph"><div class="pht" style="font-size:14px">Flagged Deals (&gt;60 days)</div>${flagged.length ? '<button class="clear-btn" id="exportFlaggedBtn">Export CSV</button>' : ''}</div>
-      <div class="tc">
-        <div class="tw">
-          <table>
-            <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>PSE</th><th>Sol. Start</th><th>SoW Send</th><th>Client Hold</th><th>TAT</th></tr></thead>
-            <tbody>${flagged.map(dealRow).join('') || '<tr><td colspan="8" class="empty">No deals are over 60 days 🎉</td></tr>'}</tbody>
-          </table>
-        </div>
-      </div>
+      <div class="ph"><div class="pht" style="font-size:14px">${boxLabel} — ${detail.length} deal(s)</div>${detail.length ? '<button class="clear-btn" id="exportTatBtn">Export CSV</button>' : ''}</div>
+      ${tatDealTable(detail, 'No deals in this view')}
 
-      <div class="sh"><div class="sht">Deal-wise TAT by PSE</div><div class="shl"></div></div>
+      <div class="sh"><div class="sht">Active TAT by PSE</div><div class="shl"></div></div>
       ${
-        pseNames
-          .map((p) => {
-            const list = byPse[p].slice().sort((a, b) => b.tatDays - a.tatDays);
-            const pseAvg = avg(list.filter((i) => i.tatStatus === 'completed').map((i) => i.tatDays));
-            return `
+        pseNames.map((p) => {
+          const list = applyTatFilters(byPse[p]).slice().sort((a, b) => (b.tatDays ?? 0) - (a.tatDays ?? 0));
+          if (!list.length) return '';
+          const pseAvg = avg(list.map((i) => i.tatDays).filter((d) => d != null));
+          return `
         <div class="tc">
-          <div class="th"><span class="tht">${p}</span><span class="ths">${list.length} deal(s) with TAT started${pseAvg != null ? ` · avg completed ${pseAvg}d` : ''}</span></div>
+          <div class="th"><span class="tht">${p}</span><span class="ths">${list.length} active deal(s)${pseAvg != null ? ` · avg ${pseAvg}d ${TAT_HEALTH_META[tatHealth(pseAvg)].label}` : ''}</span></div>
           <div class="tw">
             <table>
-              <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>PSE</th><th>Sol. Start</th><th>SoW Send</th><th>Client Hold</th><th>TAT</th></tr></thead>
-              <tbody>${list.map(dealRow).join('')}</tbody>
+              <thead><tr><th>Key</th><th>Client</th><th>PSE</th><th>Status</th><th>Sol. Start</th><th>Client Hold</th><th>Active TAT</th><th>Health</th></tr></thead>
+              <tbody>${list.map(tatDealRow).join('')}</tbody>
             </table>
           </div>
         </div>`;
-          })
-          .join('') || '<div class="empty">No deals have a Solutioning Start Date yet</div>'
+        }).join('') || '<div class="empty">No active Q1 deals match the current filters</div>'
       }
+
+      <div class="sh" style="margin-top:24px"><div class="sht">Ongoing Deals Started Before 1 May 2026 (no SoW Send yet)</div><div class="shl"></div></div>
+      <div class="phs" style="margin-bottom:10px">Carried-over active deals (Req. Gathering / Solution Design / Pending On Client / Solutions Draft Shared) — outside Q1 but still open</div>
+      ${tatDealTable(applyTatFilters(preQuarterOngoing).slice().sort((a, b) => (b.tatDays ?? 0) - (a.tatDays ?? 0)), 'No pre-quarter ongoing deals')}
+
+      <div class="sh" style="margin-top:24px"><div class="sht">Solutioning (Post Closure)</div><div class="shl"></div></div>
+      <div class="phs" style="margin-bottom:10px">Tracked separately — excluded from active TAT totals and health above</div>
+      ${tatDealTable(applyTatFilters(postClosure).slice().sort((a, b) => (b.tatDays ?? 0) - (a.tatDays ?? 0)), 'No post-closure deals')}
+
+      ${noStart.length ? `
+      <div class="sh" style="margin-top:24px"><div class="sht">Active Status, Awaiting Solutioning Start Date</div><div class="shl"></div></div>
+      <div class="phs" style="margin-bottom:10px">${noStart.length} deal(s) in an active status but with no Solutioning Start Date — TAT can't start yet</div>
+      ${tatDealTable(applyTatFilters(noStart), 'None')}` : ''}
     </div>`;
 
-  document.querySelectorAll('tbody tr[data-key]').forEach((tr) => tr.addEventListener('click', () => openCardModal(tr.dataset.key)));
-  const exportBtn = document.getElementById('exportFlaggedBtn');
+  // Row click → card modal; the Jira "↗" link opens Jira without triggering the modal.
+  document.querySelectorAll('tbody tr[data-key]').forEach((tr) =>
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('.jira-key-link')) return;
+      openCardModal(tr.dataset.key);
+    })
+  );
+
+  document.querySelectorAll('.tat-box').forEach((box) => {
+    box.addEventListener('click', () => {
+      STATE.tatBox = box.dataset.box;
+      renderTat();
+    });
+  });
+
+  const exportBtn = document.getElementById('exportTatBtn');
   if (exportBtn) exportBtn.addEventListener('click', () => {
-    downloadCsv('psv-tat-flagged.csv', toCsv(flagged, [
+    downloadCsv('psv-tat-active.csv', toCsv(detail, [
       { label: 'Key', value: (r) => r.key },
       { label: 'Client', value: (r) => r.summary },
-      { label: 'Status', value: (r) => r.status },
       { label: 'PSE', value: (r) => r.assignee },
+      { label: 'Status', value: (r) => r.status },
       { label: 'Solutioning Start', value: (r) => r.tatStartDate },
-      { label: 'SoW Send', value: (r) => r.tatEndDate },
       { label: 'Client Hold Days', value: (r) => r.tatHoldDays },
-      { label: 'TAT Days', value: (r) => r.tatDays },
+      { label: 'Active TAT Days', value: (r) => r.tatDays },
+      { label: 'Health', value: (r) => (tatHealth(r.tatDays) ? TAT_HEALTH_META[tatHealth(r.tatDays)].label : '') },
+      { label: 'Jira URL', value: (r) => r.url },
     ]));
   });
 
   destroyCharts();
   addChart(
-    'tatPseChart', 'bar', avgByPseEntries.map((e) => e[0]),
-    [{ label: 'Avg Completed TAT (days)', data: avgByPseEntries.map((e) => e[1]), backgroundColor: avgByPseEntries.map((e) => ({ great: '#12B76A', mid: '#0054FC', watch: '#D97706', flagged: '#DC2626' }[tatSeverity(e[1])] || '#94A3B8')) }],
-    { indexAxis: 'y' },
-    (pse) => goToFilteredList(`TAT — ${pse}`, (i) => i.assignee === pse && i.tatDays != null)
+    'tatPseChart', 'bar', avgByPse.map((e) => e[0]),
+    [{ label: 'Avg Active TAT (days)', data: avgByPse.map((e) => e[1]), backgroundColor: avgByPse.map((e) => TAT_HEALTH_META[tatHealth(e[1])].color) }],
+    { indexAxis: 'y', scales: { y: { ticks: { autoSkip: false } } } },
+    (pse) => { STATE.tatFilters.pse = new Set([pse]); STATE.tatBox = 'all'; renderTat(); }
   );
+}
+
+// Exclusive TAT sidebar: PSE, Status (the 4 active), Health band.
+function renderTatSidebar() {
+  if (!STATE.facc) loadSidebarPrefs();
+  const f = STATE.tatFilters;
+  const activeCount = f.pse.size + f.status.size + f.health.size;
+  const sb = document.getElementById('sidebar');
+  sb.style.display = '';
+  sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
+  const healthOpts = [['good', 'Good (≤30d)'], ['mid', 'Mid (31–60d)'], ['review', 'Review (≥61d)']];
+  sb.innerHTML = `
+    <div class="sb-header">
+      <div class="sb-title">Filters${activeCount ? `<span class="facc-badge">${activeCount}</span>` : ''}</div>
+      <button class="sb-toggle" id="sidebarToggleBtn" title="${STATE.sidebarCollapsed ? 'Expand filters' : 'Collapse filters'}">${STATE.sidebarCollapsed ? '»' : '«'}</button>
+    </div>
+    <div class="sb-content" id="sidebarContent" style="display:${STATE.sidebarCollapsed ? 'none' : ''}">
+      ${faccGroup('pse', 'PSE', checkboxListHtml('pse', STATE.options.pse, f.pse), f.pse.size)}
+      ${faccGroup('status', 'Status', checkboxListHtml('status', TAT_ACTIVE_STATUSES, f.status), f.status.size)}
+      <div class="sfgroup">
+        <label>Health</label>
+        <div class="sf-opts">
+          ${healthOpts.map(([v, lbl]) => `
+            <label class="sf-opt">
+              <input type="checkbox" data-tathealth="${v}" ${f.health.has(v) ? 'checked' : ''}/>
+              <span>${lbl}</span>
+            </label>`).join('')}
+        </div>
+      </div>
+      <button class="clear-btn-full" id="clearTatFiltersBtn">Clear all filters</button>
+    </div>`;
+
+  document.getElementById('sidebarToggleBtn').addEventListener('click', () => {
+    STATE.sidebarCollapsed = !STATE.sidebarCollapsed;
+    localStorage.setItem('psv_sidebar_collapsed', STATE.sidebarCollapsed ? '1' : '0');
+    renderTatSidebar();
+  });
+  if (STATE.sidebarCollapsed) return;
+
+  document.querySelectorAll('[data-facc-toggle]').forEach((head) => {
+    head.addEventListener('click', () => {
+      const id = head.dataset.faccToggle;
+      STATE.facc[id] = !STATE.facc[id];
+      localStorage.setItem('psv_facc_' + id, STATE.facc[id] ? '1' : '0');
+      head.closest('.facc').classList.toggle('open', STATE.facc[id]);
+    });
+  });
+
+  document.querySelectorAll('#sidebar [data-mgroup]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const set = STATE.tatFilters[cb.dataset.mgroup];
+      if (cb.checked) set.add(cb.value);
+      else set.delete(cb.value);
+      renderTat();
+    });
+  });
+
+  document.querySelectorAll('#sidebar [data-tathealth]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) STATE.tatFilters.health.add(cb.dataset.tathealth);
+      else STATE.tatFilters.health.delete(cb.dataset.tathealth);
+      renderTat();
+    });
+  });
+
+  document.getElementById('clearTatFiltersBtn').addEventListener('click', () => {
+    STATE.tatFilters = { pse: new Set(), status: new Set(), health: new Set() };
+    STATE.tatBox = 'all';
+    renderTat();
+  });
 }
 
 // ---------- Team Performance tab ----------
@@ -2401,7 +2584,7 @@ function render() {
   // Links or Activity Log — those routes swap the same sidebar element for
   // their own filter set instead (see renderQuickLinksSidebar /
   // renderActivitySidebar). Restore the normal Jira sidebar for every other tab.
-  if (!['links', 'activity', 'tracker'].includes(STATE.route.name)) renderSidebar();
+  if (!['links', 'activity', 'tracker', 'tat'].includes(STATE.route.name)) renderSidebar();
 
   if (STATE.route.name === 'status') renderStatusDrilldown(STATE.route.param);
   else if (STATE.route.name === 'segment') renderSegment(STATE.route.param);
