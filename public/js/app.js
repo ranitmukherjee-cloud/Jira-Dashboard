@@ -1428,7 +1428,12 @@ async function saveTrackerField(id, field, value, rerenderAfterSave) {
 // A simple static reference list — add entries here as they're shared.
 // Optional "group" clusters related links under the same heading.
 const QUICK_LINKS = [
-  // { name: 'Solutioning SOP', url: 'https://...', group: 'Process Docs' },
+  { name: 'GoComet_PSV_Board_PSE_Process_Guide', url: 'https://docs.google.com/document/d/1vj_hQZ3ApDX_ZLUi3P-w0cHqSE0V1bojfoiiXLJHj9Q/edit?usp=sharing' },
+  { name: 'Feature Alignment Matrix', url: 'https://docs.google.com/spreadsheets/d/1jArAvGvCjucuPTK3ZrSDZpsLoTUv1C2RmS9tMmaOBLY/edit?usp=sharing' },
+  { name: 'Customer Feature and Guardrail', url: 'https://docs.google.com/spreadsheets/d/1IZ38WmjYlbBu7FCzOHVGsHFBj_r4AQ28gom6hmHuEH0/edit?usp=sharing' },
+  { name: 'Existing Clients and Modules List', url: 'https://docs.google.com/spreadsheets/d/1Z4ezXemkt7QZzFpjtrJnHJ45DbTI9EDWe_dnnu_1ZIQ/edit?usp=sharing' },
+  { name: 'Operations (Ops) Repository Latest', url: 'https://docs.google.com/spreadsheets/d/1kXxI11KuE3CPJkFbD00mJhT7Q1E5fEmVdRcLaVvDUjA/edit?usp=sharing' },
+  { name: 'Product Council Sheet', url: 'https://docs.google.com/spreadsheets/d/1JiSiBSP2GpMxUb6wG9LfcCr53wIo7Kf9s8udA2hSdKw/edit?usp=sharing' },
 ];
 
 function renderQuickLinks() {
