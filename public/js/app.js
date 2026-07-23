@@ -1592,8 +1592,24 @@ function renderQuickLinksView() {
           return `
         <div class="link-group ${highlighted ? 'highlight' : ''}" data-drop-group="${escapeAttr(group)}">
           <div class="link-group-head">
+            ${
+              STATE.quickLinksRenamingGroup === group
+                ? `
+            <input class="fi link-group-rename-input" id="renameGroupInput" type="text" value="${escapeAttr(group)}"/>
+            <button class="link-group-mini-btn" data-save-rename="${escapeAttr(group)}" title="Save name">✓</button>
+            <button class="link-group-mini-btn" data-cancel-rename title="Cancel">✕</button>
+            `
+                : `
             <span class="link-group-title">${group}</span>
             <span class="link-group-count">${groupLinks.length}</span>
+            ${
+              group === 'Links'
+                ? ''
+                : `<button class="link-group-mini-btn" data-rename-group="${escapeAttr(group)}" title="Rename group">✎</button>
+            <button class="link-group-mini-btn link-group-del-btn ${STATE.confirmDeleteGroupId === group ? 'armed' : ''}" data-del-group="${escapeAttr(group)}" title="${STATE.confirmDeleteGroupId === group ? 'Click again to confirm — this also deletes its links' : 'Delete group'}">${STATE.confirmDeleteGroupId === group ? 'Confirm ✕' : '🗑'}</button>`
+            }
+            `
+            }
             <button class="link-add-btn" data-add-group="${escapeAttr(group)}">${adding ? 'Cancel' : '+ Add Link'}</button>
           </div>
           ${
@@ -1677,6 +1693,78 @@ function renderQuickLinksView() {
       STATE.confirmDeleteId = null;
       await fetch(`/api/quicklinks/${id}`, { method: 'DELETE' });
       STATE.quickLinks = STATE.quickLinks.filter((l) => l.id !== id);
+      renderQuickLinksView();
+    });
+  });
+
+  document.querySelectorAll('[data-rename-group]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      STATE.quickLinksRenamingGroup = btn.dataset.renameGroup;
+      renderQuickLinksView();
+    });
+  });
+
+  document.querySelectorAll('[data-cancel-rename]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      STATE.quickLinksRenamingGroup = null;
+      renderQuickLinksView();
+    });
+  });
+
+  document.querySelectorAll('[data-save-rename]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const oldName = btn.dataset.saveRename;
+      const newName = document.getElementById('renameGroupInput').value.trim();
+      if (!newName || newName === oldName) {
+        STATE.quickLinksRenamingGroup = null;
+        renderQuickLinksView();
+        return;
+      }
+      try {
+        const res = await fetch(`/api/quicklinks/groups/${encodeURIComponent(oldName)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not rename group');
+        STATE.quickLinksGroups = data;
+        STATE.quickLinks.forEach((l) => {
+          if (l.group === oldName) l.group = newName;
+        });
+        if (STATE.quickLinksFilter === oldName) STATE.quickLinksFilter = newName;
+        STATE.quickLinksRenamingGroup = null;
+        renderQuickLinksView();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  });
+
+  // Same armed two-click confirmation as link delete, but deleting a group
+  // also removes every link filed under it (a group is a container).
+  document.querySelectorAll('[data-del-group]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const group = btn.dataset.delGroup;
+      if (STATE.confirmDeleteGroupId !== group) {
+        clearTimeout(STATE.confirmDeleteGroupTimer);
+        STATE.confirmDeleteGroupId = group;
+        renderQuickLinksView();
+        STATE.confirmDeleteGroupTimer = setTimeout(() => {
+          if (STATE.confirmDeleteGroupId === group) {
+            STATE.confirmDeleteGroupId = null;
+            renderQuickLinksView();
+          }
+        }, 3500);
+        return;
+      }
+      clearTimeout(STATE.confirmDeleteGroupTimer);
+      STATE.confirmDeleteGroupId = null;
+      await fetch(`/api/quicklinks/groups/${encodeURIComponent(group)}`, { method: 'DELETE' });
+      STATE.quickLinksGroups = (STATE.quickLinksGroups || []).filter((g) => g !== group);
+      STATE.quickLinks = STATE.quickLinks.filter((l) => l.group !== group);
+      if (STATE.quickLinksFilter === group) STATE.quickLinksFilter = 'all';
       renderQuickLinksView();
     });
   });
