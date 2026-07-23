@@ -1510,14 +1510,14 @@ function renderQuickLinksView() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team · drag a card to reorder it within its group</div></div>
+      <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team · drag a card to reorder it within its group, or drag a link/tab from your browser onto a group to add it</div></div>
       ${visibleGroups
         .map((group) => {
           const groupLinks = groups[group];
           const highlighted = group !== 'Links'; // named groups (e.g. "Solutions Team Decks") stand out
           const adding = STATE.quickLinksAddingGroup === group;
           return `
-        <div class="link-group ${highlighted ? 'highlight' : ''}">
+        <div class="link-group ${highlighted ? 'highlight' : ''}" data-drop-group="${escapeAttr(group)}">
           <div class="link-group-head">
             <span class="link-group-title">${group}</span>
             <span class="link-group-count">${groupLinks.length}</span>
@@ -1607,6 +1607,73 @@ function renderQuickLinksView() {
   });
 
   bindLinkDragDrop();
+  bindExternalLinkDrop();
+}
+
+// Lets someone drag a link straight from elsewhere in the browser — another
+// tab, a bookmark, a link on a webpage — and drop it onto a group box to add
+// it as a new Quick Link. Internal card-reorder drags are handled separately
+// (bindLinkDragDrop) and stop propagation before they reach here.
+function bindExternalLinkDrop() {
+  function extractUrl(dt) {
+    const uriList = dt.getData('text/uri-list');
+    if (uriList) {
+      const first = uriList.split(/\r?\n/).find((l) => l && !l.startsWith('#'));
+      if (first) return first.trim();
+    }
+    const plain = dt.getData('text/plain');
+    if (plain && /^https?:\/\//i.test(plain.trim())) return plain.trim();
+    return null;
+  }
+  function extractName(dt, url) {
+    const html = dt.getData('text/html');
+    if (html) {
+      try {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const a = doc.querySelector('a');
+        const text = (a ? a.textContent : doc.body.textContent || '').trim();
+        if (text) return text.slice(0, 120);
+      } catch (err) {
+        /* fall through to URL-derived name */
+      }
+    }
+    try {
+      const u = new URL(url);
+      const last = u.pathname.split('/').filter(Boolean).pop();
+      return decodeURIComponent(last || u.hostname);
+    } catch (err) {
+      return url;
+    }
+  }
+
+  document.querySelectorAll('.link-group').forEach((el) => {
+    el.addEventListener('dragover', (e) => {
+      if (dragLinkCtx) return; // internal card reorder, not an external link drop
+      if (!e.dataTransfer.types.includes('text/uri-list') && !e.dataTransfer.types.includes('text/plain')) return;
+      e.preventDefault();
+      el.classList.add('group-drag-over');
+    });
+    el.addEventListener('dragleave', (e) => {
+      if (e.target === el) el.classList.remove('group-drag-over');
+    });
+    el.addEventListener('drop', async (e) => {
+      el.classList.remove('group-drag-over');
+      if (dragLinkCtx) return;
+      const url = extractUrl(e.dataTransfer);
+      if (!url) return;
+      e.preventDefault();
+      const group = el.dataset.dropGroup;
+      const name = extractName(e.dataTransfer, url);
+      const res = await fetch('/api/quicklinks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, url, group }),
+      });
+      const link = await res.json();
+      STATE.quickLinks.push(link);
+      renderQuickLinksView();
+    });
+  });
 }
 
 function bindLinkDragDrop() {
@@ -1623,13 +1690,15 @@ function bindLinkDragDrop() {
     el.addEventListener('dragover', (e) => {
       if (!dragLinkCtx || dragLinkCtx.group !== el.dataset.group || dragLinkCtx.id === el.dataset.linkId) return;
       e.preventDefault();
+      e.stopPropagation();
       el.classList.add('drag-over');
     });
     el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
     el.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      el.classList.remove('drag-over');
       if (!dragLinkCtx || dragLinkCtx.group !== el.dataset.group || dragLinkCtx.id === el.dataset.linkId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove('drag-over');
 
       const group = el.dataset.group;
       const groupLinks = STATE.quickLinks

@@ -204,7 +204,8 @@ td.tk-cell{padding:2px 4px;}
 .ql-filter-item:hover{border-color:var(--b20);color:var(--b);background:var(--bl);}
 .ql-filter-item.active{background:var(--b);border-color:var(--b);color:#fff;}
 
-.link-group{background:var(--w);border:1px solid var(--bdr);border-radius:13px;padding:18px 20px 20px;margin-bottom:20px;box-shadow:var(--e1);}
+.link-group{background:var(--w);border:1px solid var(--bdr);border-radius:13px;padding:18px 20px 20px;margin-bottom:20px;box-shadow:var(--e1);transition:border-color .15s ease,box-shadow .15s ease;}
+.link-group.group-drag-over{border-color:var(--b);border-style:dashed;box-shadow:0 0 0 3px rgba(59,91,255,.15);}
 .link-group-head{display:flex;align-items:center;gap:9px;margin-bottom:15px;}
 .link-group-title{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--n);}
 .link-group-count{background:var(--bl);color:var(--b);border-radius:20px;padding:2px 9px;font-size:10px;font-weight:800;}
