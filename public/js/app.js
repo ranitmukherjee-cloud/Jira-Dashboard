@@ -1463,21 +1463,27 @@ function renderQuickLinks() {
     <div class="page">
       <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div></div>
       ${Object.entries(groups)
-        .map(
-          ([group, links]) => `
-        <div class="sh"><div class="sht">${group}</div><div class="shl"></div></div>
-        <div class="link-grid">
-          ${links
-            .map(
-              (l) => `
-            <a class="link-card" href="${l.url}" target="_blank" rel="noopener">
-              <span class="link-card-name">${l.name}</span>
-              <span class="link-card-arrow">↗</span>
-            </a>`
-            )
-            .join('')}
-        </div>`
-        )
+        .map(([group, links]) => {
+          const highlighted = group !== 'Links'; // named groups (e.g. "Solutions Team Decks") stand out
+          return `
+        <div class="link-group ${highlighted ? 'highlight' : ''}">
+          <div class="link-group-head">
+            <span class="link-group-title">${group}</span>
+            <span class="link-group-count">${links.length}</span>
+          </div>
+          <div class="link-grid">
+            ${links
+              .map(
+                (l) => `
+              <a class="link-card" href="${l.url}" target="_blank" rel="noopener" title="${escapeAttr(l.name)}">
+                <span class="link-card-name">${l.name}</span>
+                <span class="link-card-foot">Open <span class="link-card-arrow">↗</span></span>
+              </a>`
+              )
+              .join('')}
+          </div>
+        </div>`;
+        })
         .join('')}
     </div>`;
 }
