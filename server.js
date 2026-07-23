@@ -5,7 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { getLiveData } = require('./lib/live');
-const { listTasks, createTask, updateTask, deleteTask, listLeave, setLeaveStatus } = require('./lib/tracker');
+const { listTasks, createTask, updateTask, deleteTask, listLeave, setLeaveStatus, listHolidays, setHolidayStatus } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
 const { listLinks, addLink, updateLink, reorderLinks, deleteLink, listGroups, createGroup, renameGroup, deleteGroup } = require('./lib/quickLinks');
 const {
@@ -111,6 +111,10 @@ app.get('/api/tracker', async (req, res) => {
     res.json(await listLeave());
     return;
   }
+  if (req.query.resource === 'holidays') {
+    res.json(await listHolidays());
+    return;
+  }
   res.json(await listTasks());
 });
 app.post('/api/tracker', async (req, res) => {
@@ -118,6 +122,10 @@ app.post('/api/tracker', async (req, res) => {
     const body = req.body || {};
     if (body.resource === 'leave') {
       res.json(await setLeaveStatus(body.pse, body.date, !!body.onLeave));
+      return;
+    }
+    if (body.resource === 'holidays') {
+      res.json(await setHolidayStatus(body.date, !!body.isHoliday));
       return;
     }
     res.status(201).json(await createTask(body));

@@ -1,4 +1,4 @@
-const { listTasks, createTask, listLeave, setLeaveStatus } = require('../../lib/tracker');
+const { listTasks, createTask, listLeave, setLeaveStatus, listHolidays, setHolidayStatus } = require('../../lib/tracker');
 const { USE_REDIS, initError } = require('../../lib/trackerStore');
 
 module.exports = async (req, res) => {
@@ -19,9 +19,13 @@ module.exports = async (req, res) => {
         });
         return;
       }
-      // Leave map folded into this route too (same function-cap reason).
+      // Leave + holiday maps folded into this route too (same function-cap reason).
       if (req.query.resource === 'leave') {
         res.status(200).json(await listLeave());
+        return;
+      }
+      if (req.query.resource === 'holidays') {
+        res.status(200).json(await listHolidays());
         return;
       }
       res.status(200).json(await listTasks());
@@ -31,6 +35,11 @@ module.exports = async (req, res) => {
       const body = req.body || {};
       if (body.resource === 'leave') {
         const map = await setLeaveStatus(body.pse, body.date, !!body.onLeave);
+        res.status(200).json(map);
+        return;
+      }
+      if (body.resource === 'holidays') {
+        const map = await setHolidayStatus(body.date, !!body.isHoliday);
         res.status(200).json(map);
         return;
       }

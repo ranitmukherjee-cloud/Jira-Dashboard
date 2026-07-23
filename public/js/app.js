@@ -23,6 +23,7 @@ const STATE = {
   activityFilters: { pse: new Set(), status: new Set(), dealName: '', dateFrom: '', dateTo: '' },
   trackerFilters: { pse: new Set(), status: new Set(), helpInSow: '', flagApoorv: '', dateFrom: '', dateTo: '' },
   trackerLeave: {},
+  trackerHolidays: {},
   tatFilters: { pse: new Set(), status: new Set(), health: new Set() },
   tatBox: 'all',
   route: { name: 'overview', param: null },
@@ -1546,6 +1547,14 @@ function isWeekendDay(dateStr) {
   const d = dayOfWeek(dateStr);
   return d === 0 || d === 6;
 }
+// A globally-marked official holiday (persisted, shared across all PSEs).
+function isHolidayDay(dateStr) {
+  return !!(STATE.trackerHolidays && STATE.trackerHolidays[dateStr]);
+}
+// Neither a working day for reports nor counted in delay: weekend OR holiday.
+function isNonWorkingDay(dateStr) {
+  return isWeekendDay(dateStr) || isHolidayDay(dateStr);
+}
 // PSEs don't work weekends, so Prev/Next step over Sat/Sun entirely.
 function stepWorkingDay(dateStr, dir) {
   let d = addDays(dateStr, dir);
@@ -1588,12 +1597,13 @@ function monthlyPeriodFor(dateStr) {
   const end = addDays(firstMondayOfMonth(nextY, nextM), -1);
   return { start, end, year: startY, monthIndex: startM };
 }
-// Inclusive list of Mon–Fri working-day date strings between from and to.
+// Inclusive list of working-day date strings between from and to — excludes
+// weekends AND official holidays, so reports never count an off-day as expected work.
 function workingDaysBetween(from, to) {
   const days = [];
   let d = from;
   while (d <= to) {
-    if (!isWeekendDay(d)) days.push(d);
+    if (!isNonWorkingDay(d)) days.push(d);
     d = addDays(d, 1);
   }
   return days;
@@ -1654,24 +1664,33 @@ function committedDue(task) {
 function daysBetween(fromStr, toStr) {
   return Math.round((Date.parse(toStr + 'T00:00:00Z') - Date.parse(fromStr + 'T00:00:00Z')) / 86400000);
 }
+// Working days strictly after `from`, up to and including `to`. Weekends and
+// official holidays don't count — so a Friday→Monday slip is 1 day late, not 3.
+function workingDaysAfter(from, to) {
+  if (!from || !to || to <= from) return 0;
+  let count = 0;
+  let d = addDays(from, 1);
+  while (d <= to) {
+    if (!isNonWorkingDay(d)) count++;
+    d = addDays(d, 1);
+  }
+  return count;
+}
 
 // A task is delayed when it blew past its INITIAL committed due date — whether
 // it was eventually finished late, or is still open past that date. Measured
-// against the committed date so pushing the due date out can't clear the flag.
+// against the committed date (so pushing the due date out can't clear the flag)
+// and counted in WORKING days only (weekends + holidays excluded).
 function taskDelayDays(task, referenceDay = istToday()) {
   const committed = committedDue(task);
   if (!committed) return 0;
   const endRef = task.status === 'Done' ? task.completedDate || referenceDay : referenceDay;
-  const diff = daysBetween(committed, endRef);
-  return diff > 0 ? diff : 0;
+  return workingDaysAfter(committed, endRef);
 }
-// referenceDay defaults to real "today", but the tracker view always passes
-// STATE.trackerDay explicitly — so browsing forward to a future day via
-// "Next" immediately shows tasks past their committed date as delayed.
+// Red/overdue iff there's at least one working day of delay — unifies the row
+// highlight with the delay count so weekends/holidays never trigger a false red.
 function taskOverdue(task, referenceDay = istToday()) {
-  const committed = committedDue(task);
-  if (task.status === 'Done') return !!committed && !!task.completedDate && task.completedDate > committed;
-  return !!committed && committed < referenceDay;
+  return taskDelayDays(task, referenceDay) > 0;
 }
 
 const trackerSaveTimers = {};
@@ -1680,15 +1699,17 @@ async function renderTracker() {
   document.getElementById('app').innerHTML = '<div class="page"><div class="loading">Loading tracker…</div></div>';
   if (!STATE.trackerDay) STATE.trackerDay = lastWorkingDayOnOrBefore(istToday());
   try {
-    const [tasks, leave] = await Promise.all([
+    const [tasks, leave, holidays] = await Promise.all([
       fetch('/api/tracker', { cache: 'no-store' }).then((r) => {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       }),
       fetch('/api/tracker?resource=leave', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : {})),
+      fetch('/api/tracker?resource=holidays', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : {})),
     ]);
     STATE.trackerTasks = tasks;
     STATE.trackerLeave = leave || {};
+    STATE.trackerHolidays = holidays || {};
   } catch (err) {
     document.getElementById('app').innerHTML = `<div class="page"><div class="empty">Could not load the task tracker: ${err.message}</div></div>`;
     return;
@@ -1836,6 +1857,7 @@ function renderTrackerView() {
   const leave = STATE.trackerLeave || {};
   const isToday = day === istToday();
   const weekend = isWeekendDay(day);
+  const holiday = isHolidayDay(day);
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
   renderTrackerSidebar();
@@ -1843,12 +1865,20 @@ function renderTrackerView() {
   const pses = trackerVisiblePses();
   const tasksForPse = allTasks.filter((t) => pses.includes(t.pse));
 
+  // Prominent action to mark/unmark the viewed day as an official holiday.
+  // Hidden on weekends (already non-working). A holiday still shows the sheets
+  // so a PSE who worked can log tasks — it's only dropped from report math.
+  const holidayBtn = weekend
+    ? ''
+    : `<button class="tk-holiday-btn ${holiday ? 'active' : ''}" id="holidayBtn">${holiday ? '★ Official Holiday — click to unmark' : '＋ Mark Official Holiday'}</button>`;
+
   const daynav = `
     <div class="tk-daynav">
       <button id="prevDayBtn">← Prev working day</button>
-      <div class="tk-daydate">${dayLabel}${isToday ? ' (Today)' : weekend ? ' · Weekend' : ''}</div>
+      <div class="tk-daydate">${dayLabel}${isToday ? ' (Today)' : weekend ? ' · Weekend' : ''}${holiday ? ' · Holiday' : ''}</div>
       <button id="nextDayBtn">Next working day →</button>
       ${!isToday ? '<button id="todayBtn">Jump to Today</button>' : ''}
+      ${holidayBtn}
     </div>`;
 
   if (weekend) {
@@ -1916,6 +1946,7 @@ function renderTrackerView() {
         ${summaryPanel}
       </div>
       ${daynav}
+      ${holiday ? '<div class="tk-holiday-banner">★ Official Holiday — this day is excluded from working-day and report calculations. Any tasks logged below still count.</div>' : ''}
       ${pseSections || '<div class="empty">No PSE matches the current filter</div>'}
       ${renderTrackerReports(tasksForPse, leave, pses, day)}
     </div>`;
@@ -1936,6 +1967,25 @@ function bindTrackerEvents() {
   if (todayBtn) todayBtn.addEventListener('click', () => {
     STATE.trackerDay = lastWorkingDayOnOrBefore(istToday());
     renderTrackerView();
+  });
+
+  const holidayBtn = document.getElementById('holidayBtn');
+  if (holidayBtn) holidayBtn.addEventListener('click', async () => {
+    const date = STATE.trackerDay;
+    const nextIsHoliday = !isHolidayDay(date);
+    // optimistic update
+    if (nextIsHoliday) STATE.trackerHolidays[date] = true;
+    else delete STATE.trackerHolidays[date];
+    renderTrackerView();
+    try {
+      await fetch('/api/tracker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resource: 'holidays', date, isHoliday: nextIsHoliday }),
+      });
+    } catch (err) {
+      console.error('Holiday toggle failed', err);
+    }
   });
 
   document.querySelectorAll('[data-leave-pse]').forEach((btn) => {
