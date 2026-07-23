@@ -1558,10 +1558,10 @@ function renderQuickLinksView() {
             <div class="pht">Quick Links</div>
             <div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div>
           </div>
-          <button class="link-add-btn" id="createGroupBtn">${STATE.quickLinksCreatingGroup ? 'Cancel' : '+ Create Group'}</button>
+          <button class="create-group-btn" id="createGroupBtn">${STATE.quickLinksCreatingGroup ? '✕ Cancel' : '+ Create New Group'}</button>
         </div>
         ${STATE.quickLinksCreatingGroup ? createGroupFormHtml() : ''}
-        ${STATE.quickLinksCreatingGroup ? '' : '<div class="empty">No groups yet — use "+ Create Group" to make the first one, then add links into it.</div>'}
+        ${STATE.quickLinksCreatingGroup ? '' : '<div class="empty">No groups yet — use "+ Create New Group" to make the first one, then add links into it.</div>'}
       </div>`;
     bindCreateGroupHandlers();
     return;
@@ -1581,7 +1581,7 @@ function renderQuickLinksView() {
           <div class="pht">Quick Links</div>
           <div class="phs">A quick-reference repository of important worksheets for the Product Solutions team · drag a card to reorder it within its group, or drag a link/tab from your browser onto a group to add it</div>
         </div>
-        <button class="link-add-btn" id="createGroupBtn">${STATE.quickLinksCreatingGroup ? 'Cancel' : '+ Create Group'}</button>
+        <button class="create-group-btn" id="createGroupBtn">${STATE.quickLinksCreatingGroup ? '✕ Cancel' : '+ Create New Group'}</button>
       </div>
       ${STATE.quickLinksCreatingGroup ? createGroupFormHtml() : ''}
       ${visibleGroups
