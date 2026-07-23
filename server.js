@@ -8,7 +8,6 @@ const { getLiveData } = require('./lib/live');
 const { listTasks, createTask, updateTask, deleteTask } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
 const { listLinks, addLink, updateLink, reorderLinks, deleteLink, listGroups, createGroup, renameGroup, deleteGroup } = require('./lib/quickLinks');
-const { isConfigured: slackConfigured, listUsers: listSlackUsers, postToChannel, sendDm } = require('./lib/slack');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -130,35 +129,6 @@ app.patch('/api/quicklinks/groups/:name', async (req, res) => {
 app.delete('/api/quicklinks/groups/:name', async (req, res) => {
   try {
     res.json(await deleteGroup(req.params.name));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// Slack — channel + DM messaging, backed by a Slack Bot (see lib/slack.js).
-app.get('/api/slack/config', (req, res) => {
-  res.json({ configured: slackConfigured() });
-});
-app.get('/api/slack/users', async (req, res) => {
-  try {
-    res.json(await listSlackUsers());
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-app.post('/api/slack/send-channel', async (req, res) => {
-  try {
-    await postToChannel((req.body || {}).message);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-app.post('/api/slack/send-dm', async (req, res) => {
-  try {
-    const { userId, message } = req.body || {};
-    await sendDm(userId, message);
-    res.json({ ok: true });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

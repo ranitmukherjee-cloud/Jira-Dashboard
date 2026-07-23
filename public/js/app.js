@@ -120,7 +120,7 @@ function parseRoute() {
   const [name, param] = hash.split('/');
   if (name === 'status' && param) return { name: 'status', param: decodeURIComponent(param) };
   if (name === 'segment' && param) return { name: 'segment', param: decodeURIComponent(param) };
-  if (['activity', 'mrr', 'closing', 'tat', 'team', 'pipeline', 'c3m', 'tracker', 'list', 'links', 'slack'].includes(name)) {
+  if (['activity', 'mrr', 'closing', 'tat', 'team', 'pipeline', 'c3m', 'tracker', 'list', 'links'].includes(name)) {
     return { name, param: null };
   }
   return { name: 'overview', param: null };
