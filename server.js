@@ -7,7 +7,7 @@ const path = require('path');
 const { getLiveData } = require('./lib/live');
 const { listTasks, createTask, updateTask, deleteTask } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
-const { listLinks, addLink, deleteLink } = require('./lib/quickLinks');
+const { listLinks, addLink, updateLink, reorderLinks, deleteLink } = require('./lib/quickLinks');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -82,6 +82,22 @@ app.get('/api/quicklinks', async (req, res) => {
 app.post('/api/quicklinks', async (req, res) => {
   try {
     res.status(201).json(await addLink(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.patch('/api/quicklinks/:id', async (req, res) => {
+  try {
+    res.json(await updateLink(req.params.id, req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.post('/api/quicklinks/reorder', async (req, res) => {
+  try {
+    const { group, ids } = req.body || {};
+    if (!group || !Array.isArray(ids)) throw new Error('group and ids[] are required');
+    res.json(await reorderLinks(group, ids));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

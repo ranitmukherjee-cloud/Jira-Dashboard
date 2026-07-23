@@ -1440,10 +1440,49 @@ async function renderQuickLinks() {
   renderQuickLinksView();
 }
 
+let dragLinkCtx = null; // ephemeral drag state, not persisted — { id, group }
+
+// The Quick Links filter lives in the shared left sidebar (collapsible, same
+// as the main dashboard's) rather than a page-level bar, scoped to this tab.
+function renderQuickLinksSidebar(groupNames) {
+  if (!STATE.facc) loadSidebarPrefs(); // reuses the same collapsed-state flag/localStorage key
+  const sb = document.getElementById('sidebar');
+  sb.style.display = '';
+  sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
+  sb.innerHTML = `
+    <div class="sb-header">
+      <div class="sb-title">Filters</div>
+      <button class="sb-toggle" id="sidebarToggleBtn" title="${STATE.sidebarCollapsed ? 'Expand filters' : 'Collapse filters'}">${STATE.sidebarCollapsed ? '»' : '«'}</button>
+    </div>
+    <div class="sb-content" id="sidebarContent" style="display:${STATE.sidebarCollapsed ? 'none' : ''}">
+      <div class="sfgroup">
+        <label>Filter by Group</label>
+        <div class="ql-filter-list">
+          <button class="ql-filter-item ${STATE.quickLinksFilter === 'all' ? 'active' : ''}" data-qlf="all">All</button>
+          ${groupNames.map((g) => `<button class="ql-filter-item ${STATE.quickLinksFilter === g ? 'active' : ''}" data-qlf="${escapeAttr(g)}">${g}</button>`).join('')}
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('sidebarToggleBtn').addEventListener('click', () => {
+    STATE.sidebarCollapsed = !STATE.sidebarCollapsed;
+    localStorage.setItem('psv_sidebar_collapsed', STATE.sidebarCollapsed ? '1' : '0');
+    renderQuickLinksSidebar(groupNames);
+  });
+  if (STATE.sidebarCollapsed) return;
+  document.querySelectorAll('#sidebar [data-qlf]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      STATE.quickLinksFilter = btn.dataset.qlf;
+      renderQuickLinksView();
+    });
+  });
+}
+
 function renderQuickLinksView() {
   const links = STATE.quickLinks || [];
 
   if (!links.length) {
+    document.getElementById('sidebar').style.display = 'none';
     document.getElementById('app').innerHTML = `
       <div class="page">
         <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div></div>
@@ -1453,28 +1492,25 @@ function renderQuickLinksView() {
   }
 
   const groups = {};
-  links.forEach((l) => {
-    const g = l.group || 'Links';
-    if (!groups[g]) groups[g] = [];
-    groups[g].push(l);
-  });
+  links
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .forEach((l) => {
+      const g = l.group || 'Links';
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(l);
+    });
   const groupNames = Object.keys(groups);
   if (!STATE.quickLinksFilter || !['all', ...groupNames].includes(STATE.quickLinksFilter)) {
     STATE.quickLinksFilter = 'all';
   }
   const visibleGroups = STATE.quickLinksFilter === 'all' ? groupNames : [STATE.quickLinksFilter];
 
+  renderQuickLinksSidebar(groupNames);
+
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div></div>
-      <div class="link-filter-card">
-        <span class="link-filter-icon">▾</span>
-        <span class="link-filter-label">Filter by Group</span>
-        <div class="link-filter-bar">
-          <button class="link-filter-pill ${STATE.quickLinksFilter === 'all' ? 'active' : ''}" data-qlf="all">All</button>
-          ${groupNames.map((g) => `<button class="link-filter-pill ${STATE.quickLinksFilter === g ? 'active' : ''}" data-qlf="${escapeAttr(g)}">${g}</button>`).join('')}
-        </div>
-      </div>
+      <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team · drag a card to reorder it within its group</div></div>
       ${visibleGroups
         .map((group) => {
           const groupLinks = groups[group];
@@ -1499,29 +1535,23 @@ function renderQuickLinksView() {
           }
           <div class="link-grid">
             ${groupLinks
-              .map(
-                (l) => `
-              <div class="link-card-wrap">
+              .map((l) => {
+                const armed = STATE.confirmDeleteId === l.id;
+                return `
+              <div class="link-card-wrap" draggable="true" data-link-id="${l.id}" data-group="${escapeAttr(group)}">
                 <a class="link-card" href="${l.url}" target="_blank" rel="noopener" title="${escapeAttr(l.name)}">
                   <span class="link-card-name">${l.name}</span>
                   <span class="link-card-foot">Open <span class="link-card-arrow">↗</span></span>
                 </a>
-                <button class="link-del-btn" data-del-link="${l.id}" title="Remove link">✕</button>
-              </div>`
-              )
+                <button class="link-del-btn ${armed ? 'armed' : ''}" data-del-link="${l.id}" title="${armed ? 'Click again to confirm' : 'Remove link'}">${armed ? 'Confirm ✕' : '✕'}</button>
+              </div>`;
+              })
               .join('')}
           </div>
         </div>`;
         })
         .join('')}
     </div>`;
-
-  document.querySelectorAll('[data-qlf]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      STATE.quickLinksFilter = btn.dataset.qlf;
-      renderQuickLinksView();
-    });
-  });
 
   document.querySelectorAll('[data-add-group]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -1549,14 +1579,80 @@ function renderQuickLinksView() {
     });
   });
 
+  // One-level confirmation: first click arms the button (shows "Confirm ✕",
+  // stays visible, auto-disarms after a few seconds); the SAME button must be
+  // clicked again to actually delete.
   document.querySelectorAll('[data-del-link]').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
       const id = btn.dataset.delLink;
-      if (!confirm('Remove this link?')) return;
+      if (STATE.confirmDeleteId !== id) {
+        clearTimeout(STATE.confirmDeleteTimer);
+        STATE.confirmDeleteId = id;
+        renderQuickLinksView();
+        STATE.confirmDeleteTimer = setTimeout(() => {
+          if (STATE.confirmDeleteId === id) {
+            STATE.confirmDeleteId = null;
+            renderQuickLinksView();
+          }
+        }, 3500);
+        return;
+      }
+      clearTimeout(STATE.confirmDeleteTimer);
+      STATE.confirmDeleteId = null;
       await fetch(`/api/quicklinks/${id}`, { method: 'DELETE' });
       STATE.quickLinks = STATE.quickLinks.filter((l) => l.id !== id);
       renderQuickLinksView();
+    });
+  });
+
+  bindLinkDragDrop();
+}
+
+function bindLinkDragDrop() {
+  document.querySelectorAll('.link-card-wrap').forEach((el) => {
+    el.addEventListener('dragstart', () => {
+      dragLinkCtx = { id: el.dataset.linkId, group: el.dataset.group };
+      el.classList.add('dragging');
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      document.querySelectorAll('.link-card-wrap.drag-over').forEach((n) => n.classList.remove('drag-over'));
+      dragLinkCtx = null;
+    });
+    el.addEventListener('dragover', (e) => {
+      if (!dragLinkCtx || dragLinkCtx.group !== el.dataset.group || dragLinkCtx.id === el.dataset.linkId) return;
+      e.preventDefault();
+      el.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+    el.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      el.classList.remove('drag-over');
+      if (!dragLinkCtx || dragLinkCtx.group !== el.dataset.group || dragLinkCtx.id === el.dataset.linkId) return;
+
+      const group = el.dataset.group;
+      const groupLinks = STATE.quickLinks
+        .filter((l) => (l.group || 'Links') === group)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      const fromIdx = groupLinks.findIndex((l) => l.id === dragLinkCtx.id);
+      const toIdx = groupLinks.findIndex((l) => l.id === el.dataset.linkId);
+      if (fromIdx === -1 || toIdx === -1) return;
+
+      const [moved] = groupLinks.splice(fromIdx, 1);
+      groupLinks.splice(toIdx, 0, moved);
+      const orderedIds = groupLinks.map((l) => l.id);
+      orderedIds.forEach((id, i) => {
+        const link = STATE.quickLinks.find((l) => l.id === id);
+        if (link) link.order = i;
+      });
+
+      renderQuickLinksView(); // optimistic re-render before the network round-trip
+      await fetch('/api/quicklinks/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group, ids: orderedIds }),
+      });
     });
   });
 }
@@ -1635,9 +1731,11 @@ function render() {
   const navName = ['status', 'segment', 'list'].includes(STATE.route.name) ? 'overview' : STATE.route.name;
   document.querySelector(`.nt[data-route="${navName}"]`)?.classList.add('active');
 
-  // The universal Jira filters (PSE, Status, KAM, etc.) don't apply to the
-  // static Quick Links page, so the sidebar is hidden there entirely.
-  document.getElementById('sidebar').style.display = STATE.route.name === 'links' ? 'none' : '';
+  // The universal Jira filters (PSE, Status, KAM, etc.) don't apply to Quick
+  // Links — that route swaps the same sidebar to its own group filter instead
+  // (see renderQuickLinksView/renderQuickLinksSidebar). Restore the normal
+  // Jira sidebar whenever navigating to any other tab.
+  if (STATE.route.name !== 'links') renderSidebar();
 
   if (STATE.route.name === 'status') renderStatusDrilldown(STATE.route.param);
   else if (STATE.route.name === 'segment') renderSegment(STATE.route.param);
