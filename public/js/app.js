@@ -1413,7 +1413,7 @@ function renderActivity() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Board Activity Log</div><div class="phs">Every field change across all PSV cards, most recent first · showing ${feed.length} of ${allActivity.length} · use the sidebar filters</div></div>
+      <div class="ph"><div class="pht">Jira Activity Log</div><div class="phs">Every field change across all PSV cards, most recent first · showing ${feed.length} of ${allActivity.length} · use the sidebar filters</div></div>
       <div class="tc">
         <div class="th"><span class="tht">Activity Feed</span><span class="ths">Board-wide</span></div>
         <div class="tw" style="padding:14px 18px">
