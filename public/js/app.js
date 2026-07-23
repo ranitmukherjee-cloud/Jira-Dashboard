@@ -2,11 +2,11 @@
 const QUARTER_START = '2026-05-01';
 const TRACKER_PSE_ROWS = ['Ankith', 'Avani', 'Dhananjay', 'Karan', 'Surabhi', 'Utkarsh'];
 
-const STATE = {
-  data: { generatedAt: null, count: 0, issues: [] },
-  history: [],
-  options: { pse: [], status: [], modules: [], kam: [], salesRep: [], requestCategory: [] },
-  filters: {
+// A fresh universal-filter bucket. Each tab that uses the shared sidebar keeps
+// its OWN bucket (see STATE.tabFilters), so a PSE/status/etc. selection on one
+// tab never leaks into another — filters are per-tab, not global.
+function makeUniversalFilters() {
+  return {
     search: '',
     pse: new Set(),
     status: new Set(),
@@ -19,7 +19,17 @@ const STATE = {
     startFrom: '',
     startTo: '',
     currentQuarterOnly: false,
-  },
+  };
+}
+
+// Tabs that share the universal filter sidebar; each gets an independent bucket.
+const UNIVERSAL_FILTER_TABS = ['overview', 'pipeline', 'mrr', 'closing', 'c3m', 'team'];
+
+const STATE = {
+  data: { generatedAt: null, count: 0, issues: [] },
+  history: [],
+  options: { pse: [], status: [], modules: [], kam: [], salesRep: [], requestCategory: [] },
+  tabFilters: {},
   activityFilters: { pse: new Set(), status: new Set(), dealName: '', dateFrom: '', dateTo: '' },
   trackerFilters: { pse: new Set(), status: new Set(), helpInSow: '', flagApoorv: '', dateFrom: '', dateTo: '' },
   trackerLeave: {},
@@ -30,6 +40,22 @@ const STATE = {
   adhoc: null,
   charts: [],
 };
+
+UNIVERSAL_FILTER_TABS.forEach((t) => { STATE.tabFilters[t] = makeUniversalFilters(); });
+
+// Drill-down views (status/segment/list) are launched from Overview, so they
+// share Overview's bucket; anything else falls back to Overview too.
+function filterKeyForRoute(name) {
+  if (['status', 'segment', 'list'].includes(name)) return 'overview';
+  return UNIVERSAL_FILTER_TABS.includes(name) ? name : 'overview';
+}
+
+// STATE.filters transparently resolves to the CURRENT tab's bucket, so every
+// existing `STATE.filters.*` read/write is automatically scoped per tab.
+Object.defineProperty(STATE, 'filters', {
+  get() { return STATE.tabFilters[filterKeyForRoute(STATE.route.name)]; },
+  configurable: true,
+});
 
 const CAT_COLOR = { Done: '#12B76A', 'In Progress': '#0054FC', 'To Do': '#94A3B8', New: '#94A3B8' };
 const POLL_MS = 60 * 1000;
@@ -442,20 +468,8 @@ function bindSidebarEvents() {
   });
 
   document.getElementById('clearFiltersBtn').addEventListener('click', () => {
-    STATE.filters = {
-      search: '',
-      pse: new Set(),
-      status: new Set(),
-      modules: new Set(),
-      kam: new Set(),
-      salesRep: new Set(),
-      requestCategory: new Set(),
-      tat: '',
-      dealSize: '',
-      startFrom: '',
-      startTo: '',
-      currentQuarterOnly: false,
-    };
+    // Reset only the current tab's bucket (STATE.filters is a read-only getter).
+    STATE.tabFilters[filterKeyForRoute(STATE.route.name)] = makeUniversalFilters();
     renderSidebar();
     render();
   });
