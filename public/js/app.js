@@ -1425,35 +1425,35 @@ async function saveTrackerField(id, field, value, rerenderAfterSave) {
 }
 
 // ---------- Quick Links tab ----------
-// A simple static reference list — add entries here as they're shared.
-// Optional "group" clusters related links under the same heading.
-const QUICK_LINKS = [
-  { name: 'GoComet_PSV_Board_PSE_Process_Guide', url: 'https://docs.google.com/document/d/1vj_hQZ3ApDX_ZLUi3P-w0cHqSE0V1bojfoiiXLJHj9Q/edit?usp=sharing' },
-  { name: 'Feature Alignment Matrix', url: 'https://docs.google.com/spreadsheets/d/1jArAvGvCjucuPTK3ZrSDZpsLoTUv1C2RmS9tMmaOBLY/edit?usp=sharing' },
-  { name: 'Customer Feature and Guardrail', url: 'https://docs.google.com/spreadsheets/d/1IZ38WmjYlbBu7FCzOHVGsHFBj_r4AQ28gom6hmHuEH0/edit?usp=sharing' },
-  { name: 'Existing Clients and Modules List', url: 'https://docs.google.com/spreadsheets/d/1Z4ezXemkt7QZzFpjtrJnHJ45DbTI9EDWe_dnnu_1ZIQ/edit?usp=sharing' },
-  { name: 'Operations (Ops) Repository Latest', url: 'https://docs.google.com/spreadsheets/d/1kXxI11KuE3CPJkFbD00mJhT7Q1E5fEmVdRcLaVvDUjA/edit?usp=sharing' },
-  { name: 'Product Council Sheet', url: 'https://docs.google.com/spreadsheets/d/1JiSiBSP2GpMxUb6wG9LfcCr53wIo7Kf9s8udA2hSdKw/edit?usp=sharing' },
+// Shared, persistent, user-addable reference list (own storage — see
+// lib/quickLinks.js — since this is curated-by-humans data, not from Jira).
+async function renderQuickLinks() {
+  document.getElementById('app').innerHTML = '<div class="page"><div class="loading">Loading quick links…</div></div>';
+  try {
+    const res = await fetch('/api/quicklinks', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    STATE.quickLinks = await res.json();
+  } catch (err) {
+    document.getElementById('app').innerHTML = `<div class="page"><div class="empty">Could not load Quick Links: ${err.message}</div></div>`;
+    return;
+  }
+  renderQuickLinksView();
+}
 
-  { name: 'Deck1_Training_Plan.pdf', url: 'https://gocomet.slack.com/files/U08B06AJK6K/F0B5EKSE7S9/deck1_training_plan.pdf', group: 'Solutions Team Decks' },
-  { name: 'Deck2_Operational_Checklists.pdf', url: 'https://gocomet.slack.com/files/U08B06AJK6K/F0B5MKL2YRJ/deck2_operational_checklists.pdf', group: 'Solutions Team Decks' },
-  { name: 'Deck3_Governance_Metrics.pdf', url: 'https://gocomet.slack.com/files/U08B06AJK6K/F0B5J1MTG3C/deck3_governance_metrics.pdf', group: 'Solutions Team Decks' },
-  { name: 'KPI_Incentive_Framework_Presentation.pdf', url: 'https://gocomet.slack.com/files/U08B06AJK6K/F0B52HNBADV/kpi_incentive_framework_presentation.pdf', group: 'Solutions Team Decks' },
-  { name: 'Product Solutions Team Deck.pdf', url: 'https://gocomet.slack.com/files/U08B06AJK6K/F0B5J1N11UJ/product_solutions_team_deck.pdf', group: 'Solutions Team Decks' },
-];
+function renderQuickLinksView() {
+  const links = STATE.quickLinks || [];
 
-function renderQuickLinks() {
-  if (!QUICK_LINKS.length) {
+  if (!links.length) {
     document.getElementById('app').innerHTML = `
       <div class="page">
         <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div></div>
-        <div class="empty">No links added yet — share a name and URL and it'll show up here.</div>
+        <div class="empty">No links added yet — use "+ Add Link" once a group exists, or ask to have the first ones added.</div>
       </div>`;
     return;
   }
 
   const groups = {};
-  QUICK_LINKS.forEach((l) => {
+  links.forEach((l) => {
     const g = l.group || 'Links';
     if (!groups[g]) groups[g] = [];
     groups[g].push(l);
@@ -1467,28 +1467,47 @@ function renderQuickLinks() {
   document.getElementById('app').innerHTML = `
     <div class="page">
       <div class="ph"><div class="pht">Quick Links</div><div class="phs">A quick-reference repository of important worksheets for the Product Solutions team</div></div>
-      <div class="link-filter-bar">
-        <button class="link-filter-pill ${STATE.quickLinksFilter === 'all' ? 'active' : ''}" data-qlf="all">All</button>
-        ${groupNames.map((g) => `<button class="link-filter-pill ${STATE.quickLinksFilter === g ? 'active' : ''}" data-qlf="${escapeAttr(g)}">${g}</button>`).join('')}
+      <div class="link-filter-card">
+        <span class="link-filter-icon">▾</span>
+        <span class="link-filter-label">Filter by Group</span>
+        <div class="link-filter-bar">
+          <button class="link-filter-pill ${STATE.quickLinksFilter === 'all' ? 'active' : ''}" data-qlf="all">All</button>
+          ${groupNames.map((g) => `<button class="link-filter-pill ${STATE.quickLinksFilter === g ? 'active' : ''}" data-qlf="${escapeAttr(g)}">${g}</button>`).join('')}
+        </div>
       </div>
       ${visibleGroups
         .map((group) => {
-          const links = groups[group];
+          const groupLinks = groups[group];
           const highlighted = group !== 'Links'; // named groups (e.g. "Solutions Team Decks") stand out
+          const adding = STATE.quickLinksAddingGroup === group;
           return `
         <div class="link-group ${highlighted ? 'highlight' : ''}">
           <div class="link-group-head">
             <span class="link-group-title">${group}</span>
-            <span class="link-group-count">${links.length}</span>
+            <span class="link-group-count">${groupLinks.length}</span>
+            <button class="link-add-btn" data-add-group="${escapeAttr(group)}">${adding ? 'Cancel' : '+ Add Link'}</button>
           </div>
+          ${
+            adding
+              ? `
+          <div class="link-add-form">
+            <input class="fi" id="newLinkName" type="text" placeholder="Link name…"/>
+            <input class="fi" id="newLinkUrl" type="text" placeholder="https://…"/>
+            <button class="tk-add" data-save-group="${escapeAttr(group)}">Save</button>
+          </div>`
+              : ''
+          }
           <div class="link-grid">
-            ${links
+            ${groupLinks
               .map(
                 (l) => `
-              <a class="link-card" href="${l.url}" target="_blank" rel="noopener" title="${escapeAttr(l.name)}">
-                <span class="link-card-name">${l.name}</span>
-                <span class="link-card-foot">Open <span class="link-card-arrow">↗</span></span>
-              </a>`
+              <div class="link-card-wrap">
+                <a class="link-card" href="${l.url}" target="_blank" rel="noopener" title="${escapeAttr(l.name)}">
+                  <span class="link-card-name">${l.name}</span>
+                  <span class="link-card-foot">Open <span class="link-card-arrow">↗</span></span>
+                </a>
+                <button class="link-del-btn" data-del-link="${l.id}" title="Remove link">✕</button>
+              </div>`
               )
               .join('')}
           </div>
@@ -1500,7 +1519,44 @@ function renderQuickLinks() {
   document.querySelectorAll('[data-qlf]').forEach((btn) => {
     btn.addEventListener('click', () => {
       STATE.quickLinksFilter = btn.dataset.qlf;
-      renderQuickLinks();
+      renderQuickLinksView();
+    });
+  });
+
+  document.querySelectorAll('[data-add-group]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const group = btn.dataset.addGroup;
+      STATE.quickLinksAddingGroup = STATE.quickLinksAddingGroup === group ? null : group;
+      renderQuickLinksView();
+    });
+  });
+
+  document.querySelectorAll('[data-save-group]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const group = btn.dataset.saveGroup;
+      const name = document.getElementById('newLinkName').value.trim();
+      const url = document.getElementById('newLinkUrl').value.trim();
+      if (!name || !url) return;
+      const res = await fetch('/api/quicklinks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, url, group }),
+      });
+      const link = await res.json();
+      STATE.quickLinks.push(link);
+      STATE.quickLinksAddingGroup = null;
+      renderQuickLinksView();
+    });
+  });
+
+  document.querySelectorAll('[data-del-link]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const id = btn.dataset.delLink;
+      if (!confirm('Remove this link?')) return;
+      await fetch(`/api/quicklinks/${id}`, { method: 'DELETE' });
+      STATE.quickLinks = STATE.quickLinks.filter((l) => l.id !== id);
+      renderQuickLinksView();
     });
   });
 }

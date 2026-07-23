@@ -7,6 +7,7 @@ const path = require('path');
 const { getLiveData } = require('./lib/live');
 const { listTasks, createTask, updateTask, deleteTask } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
+const { listLinks, addLink, deleteLink } = require('./lib/quickLinks');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -69,6 +70,25 @@ app.put('/api/tracker/:id', async (req, res) => {
 app.delete('/api/tracker/:id', async (req, res) => {
   try {
     res.json(await deleteTask(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Quick Links — user-added, shared, persistent (not from Jira).
+app.get('/api/quicklinks', async (req, res) => {
+  res.json(await listLinks());
+});
+app.post('/api/quicklinks', async (req, res) => {
+  try {
+    res.status(201).json(await addLink(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.delete('/api/quicklinks/:id', async (req, res) => {
+  try {
+    res.json(await deleteLink(req.params.id));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
