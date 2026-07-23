@@ -222,6 +222,41 @@ td.tk-cell{padding:2px 4px;}
 .rate-pill.rate-mid{background:var(--ab);color:var(--a);}
 .rate-pill.rate-bad{background:var(--rb);color:var(--r);}
 
+/* Daily Tracker refinements (this tab only) */
+.tk-page{max-width:none;}                       /* use the full page width for the task tables */
+.tk-cell-name{min-width:260px;}
+.tk-cell-name .tk-input{min-width:240px;}
+/* Give selects room so the value never collides with the native dropdown arrow */
+.tk-select{padding-right:24px;appearance:auto;min-width:112px;}
+.tk-select-status{min-width:130px;font-weight:700;border-radius:6px;}
+/* Three light-tone status colors */
+.tk-select-status.tk-status-open{background:#EEF2FF;color:#3B4CCA;}
+.tk-select-status.tk-status-in-progress{background:#FFF4E5;color:#B45309;}
+.tk-select-status.tk-status-done{background:#E9F9EF;color:#047857;}
+/* Flag Apoorv / Help in SOW: green for Yes, red for No */
+.tk-select-yn{min-width:78px;font-weight:700;border-radius:6px;text-align:center;}
+.tk-select-yn.yn-yes{background:var(--gb);color:#047857;}
+.tk-select-yn.yn-no{background:var(--rb);color:var(--r);}
+.tk-cell-delay{text-align:center;}
+.tk-ontime{color:var(--t3);}
+.delay-chip{display:inline-block;background:var(--rb);color:var(--r);border:1px solid #F6C9D3;border-radius:20px;padding:2px 9px;font-size:10.5px;font-weight:800;cursor:help;white-space:nowrap;}
+.report-row-delayed td{background:var(--rb);}
+.report-row-delayed:hover td{background:#FDE1E8;}
+
+/* Prominent status-summary panel (top-right of the header) */
+.tk-summary{display:flex;gap:8px;align-self:center;}
+.tk-sum-cell{display:flex;flex-direction:column;align-items:center;min-width:66px;padding:7px 12px;border-radius:10px;border:1.5px solid var(--bdr);background:var(--w);box-shadow:var(--e1);}
+.tk-sum-n{font-size:18px;font-weight:900;line-height:1;}
+.tk-sum-l{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--t3);margin-top:3px;}
+.tk-sum-open{background:#EEF2FF;border-color:#C7D2FE;}
+.tk-sum-open .tk-sum-n{color:#3B4CCA;}
+.tk-sum-prog{background:#FFF4E5;border-color:#FCD9A8;}
+.tk-sum-prog .tk-sum-n{color:#B45309;}
+.tk-sum-done{background:#E9F9EF;border-color:#A7E3C3;}
+.tk-sum-done .tk-sum-n{color:#047857;}
+.tk-sum-delayed{background:var(--rb);border-color:#F6C9D3;}
+.tk-sum-delayed .tk-sum-n{color:var(--r);}
+
 /* QUICK LINKS — scoped exclusively to this tab, no other tab uses these classes */
 /* Sidebar-hosted group filter (reuses the main sidebar's collapsible shell) */
 .ql-filter-list{display:flex;flex-direction:column;gap:6px;}

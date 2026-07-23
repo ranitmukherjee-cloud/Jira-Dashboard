@@ -1604,28 +1604,35 @@ function workingDaysBetween(from, to) {
 const WEEKLY_REPORT_START = '2026-07-27'; // Monday
 const MONTHLY_REPORT_START = '2026-08-03'; // first Monday of Aug 2026
 
-// Aggregate one PSE's completion stats across a set of working days.
-function pseStats(tasks, leave, pse, days) {
+// Aggregate one PSE's completion stats across a set of working days. Tasks are
+// bucketed by their INITIAL committed due date; "delayed" tasks (finished late
+// or still open past commitment) are collected with their extra-day count so
+// the report can highlight them and name them on hover.
+function pseStats(tasks, leave, pse, days, referenceDay = istToday()) {
   const dayset = new Set(days);
-  let due = 0, onTime = 0, late = 0, unmarked = 0, created = 0, completed = 0, leaveDays = 0;
+  let due = 0, onTime = 0, delayed = 0, unmarked = 0, created = 0, completed = 0, leaveDays = 0, extraDaysTotal = 0;
+  const delayedList = [];
   for (const d of days) if (leave[`${pse}|${d}`]) leaveDays++;
   for (const t of tasks) {
     if (t.pse !== pse) continue;
     if (t.createdDate && dayset.has(t.createdDate)) created++;
     if (t.completedDate && dayset.has(t.completedDate)) completed++;
-    if (t.dueDate && dayset.has(t.dueDate)) {
+    const committed = committedDue(t);
+    if (committed && dayset.has(committed)) {
       due++;
-      if (t.status === 'Done') {
-        if (t.completedDate && t.completedDate <= t.dueDate) onTime++;
-        else late++;
-      } else {
-        unmarked++;
+      const extra = taskDelayDays(t, referenceDay);
+      if (t.status === 'Done' && extra === 0) {
+        onTime++;
+      } else if (extra > 0) {
+        delayed++;
+        extraDaysTotal += extra;
+        delayedList.push({ name: t.dealName || '(unnamed task)', extra });
       }
+      if (t.status !== 'Done') unmarked++;
     }
   }
-  const done = onTime + late;
-  const rate = due ? Math.round((done / due) * 100) : null;
-  return { due, onTime, late, unmarked, created, completed, leaveDays, done, rate };
+  const rate = due ? Math.round((onTime / due) * 100) : null;
+  return { due, onTime, delayed, unmarked, created, completed, leaveDays, extraDaysTotal, delayedList, rate };
 }
 
 // Mirrors lib/tracker.js: still-open tasks carry forward to every day from
@@ -1639,12 +1646,32 @@ function taskVisibleOnDay(task, day) {
   return true;
 }
 
+// The hard-coded initial commitment. Falls back to the current dueDate for
+// legacy tasks created before committedDueDate existed.
+function committedDue(task) {
+  return task.committedDueDate || task.dueDate || null;
+}
+function daysBetween(fromStr, toStr) {
+  return Math.round((Date.parse(toStr + 'T00:00:00Z') - Date.parse(fromStr + 'T00:00:00Z')) / 86400000);
+}
+
+// A task is delayed when it blew past its INITIAL committed due date — whether
+// it was eventually finished late, or is still open past that date. Measured
+// against the committed date so pushing the due date out can't clear the flag.
+function taskDelayDays(task, referenceDay = istToday()) {
+  const committed = committedDue(task);
+  if (!committed) return 0;
+  const endRef = task.status === 'Done' ? task.completedDate || referenceDay : referenceDay;
+  const diff = daysBetween(committed, endRef);
+  return diff > 0 ? diff : 0;
+}
 // referenceDay defaults to real "today", but the tracker view always passes
 // STATE.trackerDay explicitly — so browsing forward to a future day via
-// "Next" immediately shows tasks due before THAT day as overdue, instead of
-// waiting for the real clock to catch up to whatever day you're looking at.
+// "Next" immediately shows tasks past their committed date as delayed.
 function taskOverdue(task, referenceDay = istToday()) {
-  return task.status !== 'Done' && !!task.dueDate && task.dueDate < referenceDay;
+  const committed = committedDue(task);
+  if (task.status === 'Done') return !!committed && !!task.completedDate && task.completedDate > committed;
+  return !!committed && committed < referenceDay;
 }
 
 const trackerSaveTimers = {};
@@ -1671,23 +1698,30 @@ async function renderTracker() {
 
 function trackerRow(t, day) {
   const overdue = taskOverdue(t, day);
+  const delay = taskDelayDays(t, day);
+  const committed = committedDue(t);
+  const statusCls = 'tk-status-' + (t.status || 'Open').toLowerCase().replace(/\s+/g, '-');
+  const delayCell = delay > 0
+    ? `<span class="delay-chip" title="Committed due ${committed || '—'}${t.dueDate && t.dueDate !== committed ? ` · revised to ${t.dueDate}` : ''} — ${t.status === 'Done' ? 'completed' : 'still open'} ${delay} day(s) late">+${delay}d late</span>`
+    : '<span class="tk-ontime">—</span>';
   return `
     <tr data-id="${t.id}" class="${overdue ? 'row-flagged' : ''}">
-      <td class="tk-cell"><input class="tk-input" data-field="dealName" value="${escapeAttr(t.dealName || '')}" placeholder="Deal name…"/></td>
+      <td class="tk-cell tk-cell-name"><input class="tk-input" data-field="dealName" value="${escapeAttr(t.dealName || '')}" placeholder="Task name…"/></td>
       <td class="tk-cell">
-        <select class="tk-select" data-field="status">
+        <select class="tk-select tk-select-status ${statusCls}" data-field="status">
           ${['Open', 'In Progress', 'Done'].map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
       </td>
       <td class="tk-cell"><input class="tk-input" type="date" data-field="dueDate" value="${t.dueDate || ''}"/></td>
+      <td class="tk-cell tk-cell-delay">${delayCell}</td>
       <td class="tk-cell">
-        <select class="tk-select" data-field="flagApoorv">
+        <select class="tk-select tk-select-yn ${t.flagApoorv ? 'yn-yes' : 'yn-no'}" data-field="flagApoorv">
           <option value="false" ${!t.flagApoorv ? 'selected' : ''}>No</option>
           <option value="true" ${t.flagApoorv ? 'selected' : ''}>Yes</option>
         </select>
       </td>
       <td class="tk-cell">
-        <select class="tk-select" data-field="helpInSow">
+        <select class="tk-select tk-select-yn ${t.helpInSow ? 'yn-yes' : 'yn-no'}" data-field="helpInSow">
           <option value="false" ${!t.helpInSow ? 'selected' : ''}>No</option>
           <option value="true" ${t.helpInSow ? 'selected' : ''}>Yes</option>
         </select>
@@ -1713,15 +1747,23 @@ function trackerRowMatchesFilters(t) {
 }
 
 function reportTable(title, subtitle, tasks, leave, days, pses) {
+  const refDay = STATE.trackerDay || istToday();
   const rows = pses.map((pse) => {
-    const s = pseStats(tasks, leave, pse, days);
+    const s = pseStats(tasks, leave, pse, days, refDay);
     const rateCls = s.rate == null ? '' : s.rate >= 80 ? 'rate-good' : s.rate >= 50 ? 'rate-mid' : 'rate-bad';
+    // Hover tooltip naming each delayed task and how many extra days it ran.
+    const delayedTip = s.delayedList.length
+      ? escapeAttr(s.delayedList.map((x) => `${x.name} (+${x.extra}d)`).join(', '))
+      : '';
+    const delayedCell = s.delayed
+      ? `<span class="delay-chip" title="Delayed tasks — ${delayedTip}">${s.delayed} · +${s.extraDaysTotal}d</span>`
+      : '0';
     return `
-      <tr>
+      <tr class="${s.delayed ? 'report-row-delayed' : ''}">
         <td class="tk-cell"><b>${pse}</b></td>
         <td class="tk-cell">${s.due}</td>
         <td class="tk-cell">${s.onTime}</td>
-        <td class="tk-cell">${s.late}</td>
+        <td class="tk-cell ${s.delayed ? 'cell-warn' : ''}">${delayedCell}</td>
         <td class="tk-cell ${s.unmarked ? 'cell-warn' : ''}">${s.unmarked}</td>
         <td class="tk-cell">${s.leaveDays}</td>
         <td class="tk-cell"><span class="rate-pill ${rateCls}">${s.rate == null ? '—' : s.rate + '%'}</span></td>
@@ -1732,7 +1774,7 @@ function reportTable(title, subtitle, tasks, leave, days, pses) {
       <div class="th"><span class="tht">${title}</span><span class="ths">${subtitle}</span></div>
       <div class="tw">
         <table>
-          <thead><tr><th>PSE</th><th>Tasks Due</th><th>On Time</th><th>Late</th><th>Unmarked</th><th>On Leave</th><th>Completion</th></tr></thead>
+          <thead><tr><th>PSE</th><th>Tasks Due</th><th>On Time</th><th title="Tasks that missed their committed due date — hover the value to see which">Delayed</th><th>Unmarked</th><th>On Leave</th><th>Completion</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -1820,7 +1862,23 @@ function renderTrackerView() {
     return;
   }
 
+  // Status summary for the prominent top-right panel: counts across the day's
+  // visible tasks (respecting filters, skipping on-leave sheets).
+  const visibleToday = tasksForPse.filter(
+    (t) => taskVisibleOnDay(t, day) && trackerRowMatchesFilters(t) && !leave[`${t.pse}|${day}`]
+  );
+  const sc = { Open: 0, 'In Progress': 0, Done: 0 };
+  visibleToday.forEach((t) => { sc[t.status] = (sc[t.status] || 0) + 1; });
+  const delayedToday = visibleToday.filter((t) => taskDelayDays(t, day) > 0).length;
   const overdueTotal = tasksForPse.filter((t) => taskOverdue(t, day)).length;
+
+  const summaryPanel = `
+    <div class="tk-summary">
+      <div class="tk-sum-cell tk-sum-open"><span class="tk-sum-n">${sc.Open}</span><span class="tk-sum-l">Open</span></div>
+      <div class="tk-sum-cell tk-sum-prog"><span class="tk-sum-n">${sc['In Progress']}</span><span class="tk-sum-l">In Progress</span></div>
+      <div class="tk-sum-cell tk-sum-done"><span class="tk-sum-n">${sc.Done}</span><span class="tk-sum-l">Done</span></div>
+      <div class="tk-sum-cell tk-sum-delayed"><span class="tk-sum-n">${delayedToday}</span><span class="tk-sum-l">Delayed</span></div>
+    </div>`;
 
   const pseSections = pses.map((pse) => {
     const onLeave = !!leave[`${pse}|${day}`];
@@ -1838,9 +1896,9 @@ function renderTrackerView() {
         onLeave
           ? '<div class="tw"><div class="empty">Marked on leave for this working day</div></div>'
           : `<div class="tw">
-        <table>
-          <thead><tr><th style="width:26%">Deal Name</th><th>Status</th><th>Due Date</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:20%">Blocker</th><th></th></tr></thead>
-          <tbody>${rows.map((t) => trackerRow(t, day)).join('') || '<tr><td colspan="7" class="empty">No tasks</td></tr>'}</tbody>
+        <table class="tk-table">
+          <thead><tr><th style="width:30%">Task Name</th><th>Status</th><th>Due Date</th><th>Delay</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:22%">Blocker</th><th></th></tr></thead>
+          <tbody>${rows.map((t) => trackerRow(t, day)).join('') || '<tr><td colspan="8" class="empty">No tasks</td></tr>'}</tbody>
         </table>
       </div>
       <div style="padding:10px 16px"><button class="tk-add" data-add-pse="${pse}">+ Add Task</button></div>`
@@ -1849,8 +1907,14 @@ function renderTrackerView() {
   }).join('');
 
   document.getElementById('app').innerHTML = `
-    <div class="page">
-      <div class="ph"><div class="pht">Daily Task Tracker</div><div class="phs">One sheet per PSE · in-progress tasks carry forward automatically until marked Done · red rows are overdue as of this day (${overdueTotal})</div></div>
+    <div class="page tk-page">
+      <div class="ph">
+        <div class="ph-text">
+          <div class="pht">Daily Task Tracker</div>
+          <div class="phs">One sheet per PSE · in-progress tasks carry forward automatically until marked Done · rows in red missed their committed due date (${overdueTotal})</div>
+        </div>
+        ${summaryPanel}
+      </div>
       ${daynav}
       ${pseSections || '<div class="empty">No PSE matches the current filter</div>'}
       ${renderTrackerReports(tasksForPse, leave, pses, day)}
