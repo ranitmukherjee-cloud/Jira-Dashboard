@@ -1618,33 +1618,31 @@ function workingDaysBetween(from, to) {
 const WEEKLY_REPORT_START = '2026-07-27'; // Monday
 const MONTHLY_REPORT_START = '2026-08-03'; // first Monday of Aug 2026
 
-// Aggregate one PSE's stats across a set of working days, bucketed by each
-// task's (flexible) due date: completed, still-pending, and delayed (finished
-// after due, or still open past due). Delayed tasks are collected with names +
-// working-day overrun for the hover tooltip.
+// Aggregate one PSE's stats over a window of working days. A task counts if it
+// is ACTIVE on the sheet on any day in the window (start date reached; carried
+// forward until Done) — matching exactly what shows on the day's sheet.
+// Completed is a subset of that total; delayed = finished after / still open
+// past its (flexible) due date.
 function pseStats(tasks, leave, pse, days, referenceDay = istToday()) {
-  const dayset = new Set(days);
-  let due = 0, doneCount = 0, delayed = 0, unmarked = 0, created = 0, completed = 0, leaveDays = 0, extraDaysTotal = 0;
+  let total = 0, doneCount = 0, delayed = 0, unmarked = 0, leaveDays = 0, extraDaysTotal = 0;
   const delayedList = [];
   for (const d of days) if (leave[`${pse}|${d}`]) leaveDays++;
   for (const t of tasks) {
     if (t.pse !== pse) continue;
-    if (t.taskStartDate && dayset.has(t.taskStartDate)) created++;
-    if (t.completedDate && dayset.has(t.completedDate)) completed++;
-    if (t.dueDate && dayset.has(t.dueDate)) {
-      due++;
-      if (t.status === 'Done') doneCount++;
-      else unmarked++;
-      const late = taskDelayDays(t, referenceDay);
-      if (late > 0) {
-        delayed++;
-        extraDaysTotal += late;
-        delayedList.push({ name: t.dealName || '(unnamed task)', d: late });
-      }
+    const active = days.some((d) => taskVisibleOnDay(t, d));
+    if (!active) continue;
+    total++;
+    if (t.status === 'Done') doneCount++;
+    else unmarked++;
+    const late = taskDelayDays(t, referenceDay);
+    if (late > 0) {
+      delayed++;
+      extraDaysTotal += late;
+      delayedList.push({ name: t.dealName || '(unnamed task)', d: late });
     }
   }
-  const rate = due ? Math.round((doneCount / due) * 100) : null;
-  return { due, doneCount, delayed, unmarked, created, completed, leaveDays, extraDaysTotal, delayedList, rate };
+  const rate = total ? Math.round((doneCount / total) * 100) : null;
+  return { due: total, doneCount, delayed, unmarked, leaveDays, extraDaysTotal, delayedList, rate };
 }
 
 // Mirrors lib/tracker.js. Visibility is anchored on the editable Task Start
@@ -1789,7 +1787,7 @@ function reportTable(title, subtitle, tasks, leave, days, pses) {
       <div class="th"><span class="tht">${title}</span><span class="ths">${subtitle}</span></div>
       <div class="tw">
         <table>
-          <thead><tr><th>PSE</th><th>Tasks Due</th><th>Completed</th><th title="Finished after the due date, or still open past it — hover to see which">Delayed</th><th>Unmarked</th><th>On Leave</th><th>Completion</th></tr></thead>
+          <thead><tr><th>PSE</th><th title="All tasks on the sheet in this period">Total Tasks</th><th>Completed</th><th title="Finished after the due date, or still open past it — hover to see which">Delayed</th><th>Unmarked</th><th>On Leave</th><th>Completion</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
@@ -1838,7 +1836,7 @@ function renderTrackerReports(tasks, leave, pses, day) {
   }
 
   return `
-    <div class="ph" style="margin-top:26px"><div class="pht" style="font-size:15px">Completion Tracker Reports</div><div class="phs">Auto-calculated · "Unmarked" = tasks due but not marked Done · weekends excluded · leave days discounted</div></div>
+    <div class="ph" style="margin-top:26px"><div class="pht" style="font-size:15px">Completion Tracker Reports</div><div class="phs">Auto-calculated · "Total Tasks" = every task on the sheet in the period · "Completed" is a subset · "Unmarked" = not yet Done · "Delayed" = past its due date · weekends & holidays excluded · leave days discounted</div></div>
     ${daily}
     ${custom}
     ${weekly}
