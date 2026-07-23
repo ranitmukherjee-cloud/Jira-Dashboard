@@ -20,6 +20,7 @@ const STATE = {
     startTo: '',
     currentQuarterOnly: false,
   },
+  activityFilters: { pse: new Set(), status: new Set(), dealName: '', dateFrom: '', dateTo: '' },
   route: { name: 'overview', param: null },
   adhoc: null,
   charts: [],
@@ -119,7 +120,7 @@ function parseRoute() {
   const [name, param] = hash.split('/');
   if (name === 'status' && param) return { name: 'status', param: decodeURIComponent(param) };
   if (name === 'segment' && param) return { name: 'segment', param: decodeURIComponent(param) };
-  if (['activity', 'mrr', 'closing', 'tat', 'team', 'pipeline', 'c3m', 'tracker', 'list', 'links'].includes(name)) {
+  if (['activity', 'mrr', 'closing', 'tat', 'team', 'pipeline', 'c3m', 'tracker', 'list', 'links', 'slack'].includes(name)) {
     return { name, param: null };
   }
   return { name: 'overview', param: null };
@@ -1189,20 +1190,40 @@ function renderTeam() {
 }
 
 // ---------- activity log ----------
+// This tab has its own left-sidebar filter set (PSE, Status, Deal Name,
+// From–To date range) instead of the universal Jira filters — the universal
+// set doesn't apply well to a per-change activity feed, so it's swapped out
+// the same way Quick Links swaps in its own group filter.
+function istDateOf(timestamp) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(timestamp));
+}
+
+function applyActivityFilters(allActivity) {
+  const f = STATE.activityFilters;
+  const dealName = f.dealName.trim().toLowerCase();
+  return allActivity.filter((a) => {
+    if (f.pse.size && !f.pse.has(a.assignee)) return false;
+    if (f.status.size && !f.status.has(a.status)) return false;
+    if (dealName && !`${a.summary || ''}`.toLowerCase().includes(dealName)) return false;
+    const day = istDateOf(a.created);
+    if (f.dateFrom && day < f.dateFrom) return false;
+    if (f.dateTo && day > f.dateTo) return false;
+    return true;
+  });
+}
+
 function renderActivity() {
   const allActivity = STATE.data.issues
-    .flatMap((i) => (i.history || []).map((h) => ({ ...h, key: i.key, summary: i.summary })))
+    .flatMap((i) => (i.history || []).map((h) => ({ ...h, key: i.key, summary: i.summary, assignee: i.assignee, status: i.status })))
     .sort((a, b) => new Date(b.created) - new Date(a.created));
 
-  const search = STATE.filters.search.trim().toLowerCase();
-  const feed = (search
-    ? allActivity.filter((a) => `${a.key} ${a.summary} ${a.author || ''} ${a.field}`.toLowerCase().includes(search))
-    : allActivity
-  ).slice(0, 400);
+  const feed = applyActivityFilters(allActivity).slice(0, 400);
+
+  renderActivitySidebar();
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Board Activity Log</div><div class="phs">Every field change across all PSV cards, most recent first · showing ${feed.length} of ${allActivity.length} · use the sidebar search</div></div>
+      <div class="ph"><div class="pht">Board Activity Log</div><div class="phs">Every field change across all PSV cards, most recent first · showing ${feed.length} of ${allActivity.length} · use the sidebar filters</div></div>
       <div class="tc">
         <div class="th"><span class="tht">Activity Feed</span><span class="ths">Board-wide</span></div>
         <div class="tw" style="padding:14px 18px">
@@ -1225,6 +1246,90 @@ function renderActivity() {
     </div>`;
 
   document.querySelectorAll('.tl-key').forEach((el) => el.addEventListener('click', () => openCardModal(el.dataset.key)));
+}
+
+function renderActivitySidebar() {
+  if (!STATE.facc) loadSidebarPrefs(); // reuses the same collapsed-state flag/localStorage keys as the universal sidebar
+  const f = STATE.activityFilters;
+  const activeCount = f.pse.size + f.status.size + (f.dealName.trim() ? 1 : 0) + (f.dateFrom ? 1 : 0) + (f.dateTo ? 1 : 0);
+  const sb = document.getElementById('sidebar');
+  sb.style.display = '';
+  sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
+  sb.innerHTML = `
+    <div class="sb-header">
+      <div class="sb-title">Filters${activeCount ? `<span class="facc-badge">${activeCount}</span>` : ''}</div>
+      <button class="sb-toggle" id="sidebarToggleBtn" title="${STATE.sidebarCollapsed ? 'Expand filters' : 'Collapse filters'}">${STATE.sidebarCollapsed ? '»' : '«'}</button>
+    </div>
+    <div class="sb-content" id="sidebarContent" style="display:${STATE.sidebarCollapsed ? 'none' : ''}">
+      <div class="sfgroup">
+        <label>Deal Name</label>
+        <input class="fi" id="actDealNameInput" type="text" placeholder="Search deal name…" value="${escapeAttr(f.dealName)}"/>
+      </div>
+
+      ${faccGroup('pse', 'PSE', checkboxListHtml('pse', STATE.options.pse, f.pse), f.pse.size)}
+      ${faccGroup('status', 'Status', checkboxListHtml('status', STATE.options.status, f.status), f.status.size)}
+
+      <div class="sfgroup">
+        <label>Date Range (From – To)</label>
+        <div class="sf-daterow">
+          <input type="date" class="fi" id="actDateFromInput" value="${f.dateFrom}"/>
+          <input type="date" class="fi" id="actDateToInput" value="${f.dateTo}"/>
+        </div>
+      </div>
+
+      <button class="clear-btn-full" id="clearActivityFiltersBtn">Clear all filters</button>
+    </div>`;
+
+  bindActivitySidebarEvents();
+}
+
+function bindActivitySidebarEvents() {
+  document.getElementById('sidebarToggleBtn').addEventListener('click', () => {
+    STATE.sidebarCollapsed = !STATE.sidebarCollapsed;
+    localStorage.setItem('psv_sidebar_collapsed', STATE.sidebarCollapsed ? '1' : '0');
+    renderActivitySidebar();
+  });
+
+  if (STATE.sidebarCollapsed) return;
+
+  document.getElementById('actDealNameInput').addEventListener('input', (e) => {
+    STATE.activityFilters.dealName = e.target.value;
+    renderActivity();
+  });
+
+  document.getElementById('actDateFromInput').addEventListener('change', (e) => {
+    STATE.activityFilters.dateFrom = e.target.value;
+    renderActivity();
+  });
+
+  document.getElementById('actDateToInput').addEventListener('change', (e) => {
+    STATE.activityFilters.dateTo = e.target.value;
+    renderActivity();
+  });
+
+  document.querySelectorAll('[data-facc-toggle]').forEach((head) => {
+    head.addEventListener('click', () => {
+      const id = head.dataset.faccToggle;
+      STATE.facc[id] = !STATE.facc[id];
+      localStorage.setItem('psv_facc_' + id, STATE.facc[id] ? '1' : '0');
+      head.closest('.facc').classList.toggle('open', STATE.facc[id]);
+    });
+  });
+
+  document.querySelectorAll('#sidebar [data-mgroup]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const group = cb.dataset.mgroup;
+      const set = STATE.activityFilters[group];
+      if (cb.checked) set.add(cb.value);
+      else set.delete(cb.value);
+      renderActivity();
+    });
+  });
+
+  document.getElementById('clearActivityFiltersBtn').addEventListener('click', () => {
+    STATE.activityFilters = { pse: new Set(), status: new Set(), dealName: '', dateFrom: '', dateTo: '' };
+    renderActivity();
+  });
 }
 
 function describeActivity(h) {
@@ -1964,10 +2069,10 @@ function render() {
   document.querySelector(`.nt[data-route="${navName}"]`)?.classList.add('active');
 
   // The universal Jira filters (PSE, Status, KAM, etc.) don't apply to Quick
-  // Links — that route swaps the same sidebar to its own group filter instead
-  // (see renderQuickLinksView/renderQuickLinksSidebar). Restore the normal
-  // Jira sidebar whenever navigating to any other tab.
-  if (STATE.route.name !== 'links') renderSidebar();
+  // Links or Activity Log — those routes swap the same sidebar element for
+  // their own filter set instead (see renderQuickLinksSidebar /
+  // renderActivitySidebar). Restore the normal Jira sidebar for every other tab.
+  if (!['links', 'activity'].includes(STATE.route.name)) renderSidebar();
 
   if (STATE.route.name === 'status') renderStatusDrilldown(STATE.route.param);
   else if (STATE.route.name === 'segment') renderSegment(STATE.route.param);
