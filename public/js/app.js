@@ -2107,6 +2107,11 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
   }
 });
 
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  await fetch('/api/auth', { method: 'DELETE' });
+  location.href = '/login.html';
+});
+
 // ---------- boot ----------
 (async function main() {
   STATE.route = parseRoute();

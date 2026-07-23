@@ -8,11 +8,64 @@ const { getLiveData } = require('./lib/live');
 const { listTasks, createTask, updateTask, deleteTask } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
 const { listLinks, addLink, updateLink, reorderLinks, deleteLink, listGroups, createGroup, renameGroup, deleteGroup } = require('./lib/quickLinks');
+const {
+  createSession,
+  isValidSession,
+  destroySession,
+  checkCredentials,
+  recordFailedAttempt,
+  isRateLimited,
+  clearFailedAttempts,
+} = require('./lib/authStore');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+
+function getCookie(req, name) {
+  const cookie = req.headers.cookie || '';
+  const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
+  return match ? match[1] : null;
+}
+
+// Login gate — mirrors middleware.js on Vercel. Runs before static files and
+// every API route except the login page itself and the auth endpoint.
+app.use(async (req, res, next) => {
+  if (req.path === '/login.html' || req.path === '/api/auth') return next();
+  const valid = await isValidSession(getCookie(req, 'session'));
+  if (valid) return next();
+  if (req.path.startsWith('/api/')) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+  res.redirect('/login.html');
+});
+
+app.post('/api/auth', async (req, res) => {
+  const id = req.ip || 'unknown';
+  if (await isRateLimited(id)) {
+    res.status(429).json({ error: 'Too many failed attempts. Try again in a few minutes.' });
+    return;
+  }
+  const { username, password } = req.body || {};
+  if (!checkCredentials(username, password)) {
+    await recordFailedAttempt(id);
+    res.status(401).json({ error: 'Invalid username or password' });
+    return;
+  }
+  await clearFailedAttempts(id);
+  const token = await createSession();
+  res.setHeader('Set-Cookie', `session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${14 * 24 * 60 * 60}`);
+  res.json({ ok: true });
+});
+app.delete('/api/auth', async (req, res) => {
+  const token = getCookie(req, 'session');
+  if (token) await destroySession(token);
+  res.setHeader('Set-Cookie', 'session=; Path=/; HttpOnly; Max-Age=0');
+  res.json({ ok: true });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/data', async (req, res) => {
@@ -39,18 +92,21 @@ app.post('/api/refresh', async (req, res) => {
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // Daily Task Tracker — manually entered, shared, persistent (not from Jira).
-app.get('/api/tracker/debug', (req, res) => {
-  const err = initError();
-  res.json({
-    hasKvUrl: !!process.env.KV_REST_API_URL,
-    hasKvToken: !!process.env.KV_REST_API_TOKEN,
-    hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
-    hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
-    useRedis: USE_REDIS,
-    initError: err ? err.message : null,
-  });
-});
 app.get('/api/tracker', async (req, res) => {
+  // ?debug=1 folded in here (matches api/tracker/index.js on Vercel) instead
+  // of its own route, to keep the two deployments' API surface identical.
+  if (req.query.debug) {
+    const err = initError();
+    res.json({
+      hasKvUrl: !!process.env.KV_REST_API_URL,
+      hasKvToken: !!process.env.KV_REST_API_TOKEN,
+      hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+      hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+      useRedis: USE_REDIS,
+      initError: err ? err.message : null,
+    });
+    return;
+  }
   res.json(await listTasks());
 });
 app.post('/api/tracker', async (req, res) => {

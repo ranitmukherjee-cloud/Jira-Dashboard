@@ -1,8 +1,24 @@
 const { listTasks, createTask } = require('../../lib/tracker');
+const { USE_REDIS, initError } = require('../../lib/trackerStore');
 
 module.exports = async (req, res) => {
   try {
     if (req.method === 'GET') {
+      // Folded in from the old dedicated api/tracker/debug.js -- kept as a
+      // query param instead of its own file to stay under Vercel Hobby's
+      // 12-serverless-function cap. Never exposes actual secret values.
+      if (req.query.debug) {
+        const err = initError();
+        res.status(200).json({
+          hasKvUrl: !!process.env.KV_REST_API_URL,
+          hasKvToken: !!process.env.KV_REST_API_TOKEN,
+          hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+          hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+          useRedis: USE_REDIS,
+          initError: err ? err.message : null,
+        });
+        return;
+      }
       res.status(200).json(await listTasks());
       return;
     }
