@@ -1434,6 +1434,12 @@ const QUICK_LINKS = [
   { name: 'Existing Clients and Modules List', url: 'https://docs.google.com/spreadsheets/d/1Z4ezXemkt7QZzFpjtrJnHJ45DbTI9EDWe_dnnu_1ZIQ/edit?usp=sharing' },
   { name: 'Operations (Ops) Repository Latest', url: 'https://docs.google.com/spreadsheets/d/1kXxI11KuE3CPJkFbD00mJhT7Q1E5fEmVdRcLaVvDUjA/edit?usp=sharing' },
   { name: 'Product Council Sheet', url: 'https://docs.google.com/spreadsheets/d/1JiSiBSP2GpMxUb6wG9LfcCr53wIo7Kf9s8udA2hSdKw/edit?usp=sharing' },
+
+  { name: 'Deck1_Training_Plan.pdf', url: 'https://gocomet.slack.com/files/U08B06AJK6K/F0B5EKSE7S9/deck1_training_plan.pdf', group: 'Solutions Team Decks' },
+  { name: 'Deck2_Operational_Checklists.pdf', url: 'https://gocomet.slack.com/files/U08B06AJK6K/F0B5MKL2YRJ/deck2_operational_checklists.pdf', group: 'Solutions Team Decks' },
+  { name: 'Deck3_Governance_Metrics.pdf', url: 'https://gocomet.slack.com/files/U08B06AJK6K/F0B5J1MTG3C/deck3_governance_metrics.pdf', group: 'Solutions Team Decks' },
+  { name: 'KPI_Incentive_Framework_Presentation.pdf', url: 'https://gocomet.slack.com/files/U08B06AJK6K/F0B52HNBADV/kpi_incentive_framework_presentation.pdf', group: 'Solutions Team Decks' },
+  { name: 'Product Solutions Team Deck.pdf', url: 'https://gocomet.slack.com/files/U08B06AJK6K/F0B5J1N11UJ/product_solutions_team_deck.pdf', group: 'Solutions Team Decks' },
 ];
 
 function renderQuickLinks() {
