@@ -1766,6 +1766,9 @@ function trackerRow(t, day, { hideFlagCol = false } = {}) {
   const overdue = taskOverdue(t, day);
   const rowCls = overdue ? 'row-flagged' : '';
   const statusCls = 'tk-status-' + (t.status || 'Open').toLowerCase().replace(/\s+/g, '-');
+  // Armed, 2-click delete confirmation — same pattern as the Flagged-for-Apoorv
+  // panel, so nobody can delete a task with a single accidental click.
+  const armed = STATE.taskDeleteId === t.id;
 
   return `
     <tr data-id="${t.id}" class="${rowCls}">
@@ -1791,7 +1794,7 @@ function trackerRow(t, day, { hideFlagCol = false } = {}) {
       </td>
       <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="blocker" rows="1" placeholder="Blocker…">${escapeHtml(t.blocker || '')}</textarea></td>
       <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="remarks" rows="1" placeholder="Remarks…">${escapeHtml(t.remarks || '')}</textarea></td>
-      <td class="tk-cell"><button class="tk-del" data-del-id="${t.id}" title="Delete task">✕</button></td>
+      <td class="tk-cell"><button class="tk-del ${armed ? 'armed' : ''}" data-del-id="${t.id}" title="${armed ? 'Click again to confirm delete' : 'Delete this task'}">${armed ? 'Confirm ✕' : '✕'}</button></td>
     </tr>`;
 }
 
@@ -2118,10 +2121,28 @@ function bindTrackerEvents() {
     });
   });
 
+  // Armed, 2-click confirmation for every PSE's own task table (mirrors the
+  // Flagged-for-Apoorv panel) instead of a native confirm() popup — first
+  // click arms the button ("Confirm ✕", auto-disarms after ~3.5s), the SAME
+  // button must be clicked again to actually delete.
   document.querySelectorAll('.tk-del').forEach((btn) => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
       const id = btn.dataset.delId;
-      if (!confirm('Delete this task?')) return;
+      if (STATE.taskDeleteId !== id) {
+        clearTimeout(STATE.taskDeleteTimer);
+        STATE.taskDeleteId = id;
+        renderTrackerView();
+        STATE.taskDeleteTimer = setTimeout(() => {
+          if (STATE.taskDeleteId === id) {
+            STATE.taskDeleteId = null;
+            renderTrackerView();
+          }
+        }, 3500);
+        return;
+      }
+      clearTimeout(STATE.taskDeleteTimer);
+      STATE.taskDeleteId = null;
       await fetch(`/api/tracker/${id}`, { method: 'DELETE' });
       STATE.trackerTasks = STATE.trackerTasks.filter((t) => t.id !== id);
       renderTrackerView();

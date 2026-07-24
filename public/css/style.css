@@ -242,8 +242,10 @@ tr.row-flagged:hover td{background:#FDE1E8 !important;}
 .tk-input,.tk-select{width:100%;border:1px solid transparent;background:transparent;font-family:inherit;font-size:12px;color:var(--t1);padding:5px 6px;border-radius:5px;}
 .tk-input:hover,.tk-select:hover{background:var(--bg);}
 .tk-input:focus,.tk-select:focus{outline:none;border-color:var(--b);background:var(--w);}
-.tk-del{background:none;border:none;color:var(--t3);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:5px;}
+.tk-del{background:none;border:none;color:var(--t3);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:5px;transition:all .15s;}
 .tk-del:hover{background:var(--rb);color:var(--r);}
+.tk-del.armed{background:var(--r);color:#fff;font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;white-space:nowrap;}
+.tk-del.armed:hover{background:#B91C3C;}
 td.tk-cell{padding:2px 4px;}
 
 /* On-Leave toggle + report tables (Daily Tracker tab only) */
