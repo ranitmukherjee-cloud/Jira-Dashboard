@@ -37,6 +37,9 @@ const STATE = {
   tatFilters: { pse: new Set(), status: new Set(), health: new Set(), kam: new Set(), salesRep: new Set(), dealSize: '' },
   tatBox: 'all',
   tatSort: {}, // per-table sort state: { fy2627:{key,dir}, fy2526:{...}, poc:{...} }
+  updateCards: [],
+  updateFilters: { pse: new Set(), status: new Set(), kam: new Set(), salesRep: new Set(), requestCategory: new Set(), completeness: 'all', sections: new Set(), missingField: '' },
+  updateCollapsed: new Set(), // PSE panels collapsed on the Jira Update Check tab
   route: { name: 'overview', param: null },
   adhoc: null,
   charts: [],
@@ -152,7 +155,7 @@ function parseRoute() {
   const [name, param] = hash.split('/');
   if (name === 'status' && param) return { name: 'status', param: decodeURIComponent(param) };
   if (name === 'segment' && param) return { name: 'segment', param: decodeURIComponent(param) };
-  if (['activity', 'mrr', 'closing', 'tat', 'team', 'pipeline', 'c3m', 'tracker', 'list', 'links'].includes(name)) {
+  if (['activity', 'mrr', 'closing', 'tat', 'team', 'pipeline', 'c3m', 'tracker', 'list', 'links', 'update'].includes(name)) {
     return { name, param: null };
   }
   return { name: 'overview', param: null };
@@ -2634,6 +2637,302 @@ function bindLinkDragDrop() {
   });
 }
 
+// ---------- Jira Update Check tab (field-completeness sanity view) ----------
+// Read-only: shows every tracked card's fields with blanks highlighted red.
+// PSEs fill blanks natively in Jira (via the card link); this reflects live.
+const UC_SECTIONS = [
+  { key: 'discovery', label: 'Discovery', cols: [
+    { key: 'modules', label: 'List of Modules', type: 'arr' },
+    { key: 'shipmentType', label: 'Shipment Type', type: 'arr' },
+    { key: 'regionOfUse', label: 'Region of Use', type: 'arr' },
+    { key: 'shipmentVolumePerMonth', label: 'Shipment Vol/Mo', type: 'num' },
+  ] },
+  { key: 'solutioning', label: 'Solutioning', cols: [
+    { key: 'solutioningStartDate', label: 'Sol. Start Date', type: 'date' },
+    { key: 'processFlowDoc', label: 'Process Flow Doc', type: 'rich' },
+    { key: 'scopeOfWork', label: 'Scope of Work', type: 'rich' },
+    { key: 'solPriority', label: 'Sol. Priority', type: 'text' },
+    { key: 'sowSendDate', label: 'SoW Send Date', type: 'date' },
+  ] },
+  { key: 'details', label: 'Details', cols: [
+    { key: 'companySize', label: 'Company Size', type: 'text' },
+    { key: 'projectComplexity', label: 'Project Complexity', type: 'text' },
+    { key: 'clientRank', label: 'Client Rank', type: 'text' },
+    { key: 'requestCategory', label: 'Request Category', type: 'text' },
+    { key: 'mrr', label: 'MRR (USD)', type: 'num' },
+    { key: 'kam', label: 'KAM', type: 'text' },
+    { key: 'salesRep', label: 'Sales Rep', type: 'text' },
+    { key: 'expectedSalesClosure', label: 'Exp. Sales Closure', type: 'date' },
+    { key: 'expectedClosureWeeks', label: 'Exp. Closure (wks)', type: 'text' },
+  ] },
+];
+const UC_ALL_COLS = UC_SECTIONS.flatMap((s) => s.cols);
+
+function ucIsBlank(v, type) {
+  if (v == null) return true;
+  if (type === 'arr') return !Array.isArray(v) || v.length === 0;
+  if (type === 'rich') return !v || (!v.text && !(v.links && v.links.length));
+  return String(v).trim() === '';
+}
+function ucBlanksCount(card) {
+  return UC_ALL_COLS.reduce((n, c) => n + (ucIsBlank(card[c.key], c.type) ? 1 : 0), 0);
+}
+function ucCellContent(card, col) {
+  const v = card[col.key];
+  if (col.type === 'arr') return v.join(', ');
+  if (col.type === 'rich') {
+    const link = v.links && v.links[0];
+    if (link) return `<a href="${link}" target="_blank" rel="noopener" class="uc-doc-link" title="${escapeAttr(v.text || link)}">Open ↗</a>`;
+    return `<span title="${escapeAttr(v.text || '')}">${escapeHtml((v.text || '').slice(0, 40))}</span>`;
+  }
+  if (col.type === 'num') return col.key === 'mrr' ? fmtUsd(v) : v;
+  if (col.type === 'date') return new Date(v + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+  return escapeHtml(String(v));
+}
+
+function ucVisibleSections() {
+  const sel = STATE.updateFilters.sections;
+  return sel.size ? UC_SECTIONS.filter((s) => sel.has(s.key)) : UC_SECTIONS;
+}
+
+function applyUpdateFilters(cards) {
+  const f = STATE.updateFilters;
+  return cards.filter((c) => {
+    if (f.pse.size && !f.pse.has(c.assignee)) return false;
+    if (f.status.size && !f.status.has(c.status)) return false;
+    if (f.kam.size && !f.kam.has(c.kam)) return false;
+    if (f.salesRep.size && !f.salesRep.has(c.salesRep)) return false;
+    if (f.requestCategory.size && !f.requestCategory.has(c.requestCategory)) return false;
+    const blanks = ucBlanksCount(c);
+    if (f.completeness === 'incomplete' && blanks === 0) return false;
+    if (f.completeness === 'complete' && blanks > 0) return false;
+    if (f.missingField) {
+      const col = UC_ALL_COLS.find((x) => x.key === f.missingField);
+      if (col && !ucIsBlank(c[col.key], col.type)) return false;
+    }
+    return true;
+  });
+}
+
+async function renderUpdateCheck() {
+  document.getElementById('app').innerHTML = '<div class="page"><div class="loading">Loading Jira cards…</div></div>';
+  try {
+    const res = await fetch('/api/update-check', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    STATE.updateCards = data.cards || [];
+  } catch (err) {
+    document.getElementById('app').innerHTML = `<div class="page"><div class="empty">Could not load Jira cards: ${err.message}</div></div>`;
+    return;
+  }
+  renderUpdateCheckView();
+}
+
+function renderUpdateCheckView() {
+  renderUpdateCheckSidebar();
+  const cards = applyUpdateFilters(STATE.updateCards);
+  const sections = ucVisibleSections();
+
+  // Group by PSE.
+  const byPse = {};
+  cards.forEach((c) => { (byPse[c.assignee] = byPse[c.assignee] || []).push(c); });
+  const pseNames = Object.keys(byPse).sort((a, b) => byPse[b].length - byPse[a].length);
+
+  const totalBlanks = cards.reduce((n, c) => n + ucBlanksCount(c), 0);
+  const incomplete = cards.filter((c) => ucBlanksCount(c) > 0).length;
+
+  const groupHead = `<tr>
+      <th class="uc-sticky" rowspan="2">Card</th>
+      <th rowspan="2">Client</th>
+      <th rowspan="2">Status</th>
+      <th rowspan="2">Blanks</th>
+      ${sections.map((s) => `<th class="uc-group uc-group-${s.key}" colspan="${s.cols.length}">${s.label}</th>`).join('')}
+    </tr>
+    <tr>${sections.map((s) => s.cols.map((c) => `<th class="uc-fh uc-fh-${s.key}">${c.label}</th>`).join('')).join('')}</tr>`;
+
+  const panels = pseNames.map((pse) => {
+    const list = byPse[pse].slice().sort((a, b) => ucBlanksCount(b) - ucBlanksCount(a));
+    const collapsed = STATE.updateCollapsed.has(pse);
+    const pseBlanks = list.reduce((n, c) => n + ucBlanksCount(c), 0);
+    const rows = list.map((c) => {
+      const blanks = ucBlanksCount(c);
+      return `<tr data-key="${c.key}">
+        <td class="uc-sticky uc-keycell"><a class="jira-key-link" href="${c.url}" target="_blank" rel="noopener" title="Open ${c.key} in Jira">${c.key} ↗</a></td>
+        <td class="uc-client">${c.summary || '<span class="uc-blank-txt">—</span>'}</td>
+        <td>${fbadge(c.status)}</td>
+        <td><span class="uc-blanks ${blanks ? 'has' : 'none'}">${blanks || '✓'}</span></td>
+        ${sections.map((s) => s.cols.map((col) => {
+          const blank = ucIsBlank(c[col.key], col.type);
+          return blank
+            ? `<td class="uc-cell uc-blank" title="${col.label} is empty — fill it in Jira">—</td>`
+            : `<td class="uc-cell">${ucCellContent(c, col)}</td>`;
+        }).join('')).join('')}
+      </tr>`;
+    }).join('');
+    return `
+      <div class="uc-panel">
+        <div class="uc-panel-head ${collapsed ? 'collapsed' : ''}" data-uc-toggle="${escapeAttr(pse)}">
+          <span class="uc-chev">▸</span>
+          <span class="uc-panel-name">${pse}</span>
+          <span class="uc-panel-meta">${list.length} card(s) · <span class="${pseBlanks ? 'uc-meta-red' : 'uc-meta-green'}">${pseBlanks} blank field(s)</span></span>
+        </div>
+        ${collapsed ? '' : `<div class="uc-panel-body"><div class="tw uc-tw"><table class="uc-table"><thead>${groupHead}</thead><tbody>${rows}</tbody></table></div></div>`}
+      </div>`;
+  }).join('') || '<div class="empty">No cards match the current filters</div>';
+
+  document.getElementById('app').innerHTML = `
+    <div class="page tk-page">
+      <div class="ph">
+        <div class="ph-text">
+          <div class="pht">Jira Update Check</div>
+          <div class="phs">Field-completeness sanity check · live from Jira · <b>${cards.length}</b> cards · <b class="uc-meta-red">${totalBlanks}</b> blank fields across <b>${incomplete}</b> incomplete card(s) · red cells are empty — click a card's key to open it in Jira and fill it</div>
+        </div>
+        <div class="uc-summary">
+          <div class="uc-sum-cell"><span class="uc-sum-n">${cards.length}</span><span class="uc-sum-l">Cards</span></div>
+          <div class="uc-sum-cell uc-sum-red"><span class="uc-sum-n">${incomplete}</span><span class="uc-sum-l">Incomplete</span></div>
+          <div class="uc-sum-cell uc-sum-green"><span class="uc-sum-n">${cards.length - incomplete}</span><span class="uc-sum-l">Complete</span></div>
+        </div>
+      </div>
+      ${panels}
+    </div>`;
+
+  document.querySelectorAll('[data-uc-toggle]').forEach((head) => {
+    head.addEventListener('click', () => {
+      const pse = head.dataset.ucToggle;
+      if (STATE.updateCollapsed.has(pse)) STATE.updateCollapsed.delete(pse);
+      else STATE.updateCollapsed.add(pse);
+      renderUpdateCheckView();
+    });
+  });
+
+  document.querySelectorAll('.uc-table tbody tr[data-key]').forEach((tr) => {
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('.jira-key-link') || e.target.closest('.uc-doc-link')) return;
+      openUpdateDetail(tr.dataset.key);
+    });
+  });
+}
+
+// Card detail summary shown in the shared modal (point 6), sections + red blanks.
+function openUpdateDetail(key) {
+  const c = STATE.updateCards.find((x) => x.key === key);
+  if (!c) return;
+  const blanks = ucBlanksCount(c);
+  const sectionHtml = UC_SECTIONS.map((s) => `
+    <div class="uc-detail-section">
+      <div class="uc-detail-sec-title uc-group-${s.key}">${s.label}</div>
+      <div class="uc-detail-grid">
+        ${s.cols.map((col) => {
+          const blank = ucIsBlank(c[col.key], col.type);
+          return `<div class="uc-detail-field ${blank ? 'uc-blank' : ''}">
+            <div class="uc-detail-label">${col.label}</div>
+            <div class="uc-detail-value">${blank ? '<span class="uc-blank-txt">— empty —</span>' : ucCellContent(c, col)}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
+  document.getElementById('modalContent').innerHTML = `
+    <div class="modal-head">
+      <div>
+        <div class="modal-key">${c.key} · ${fbadge(c.status)}</div>
+        <div class="modal-title">${c.summary || ''}</div>
+      </div>
+      <button class="modal-close" id="modalCloseBtn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="uc-detail-top">
+        <div><span class="uc-detail-label">PSE</span> <b>${c.assignee || '—'}</b></div>
+        <div class="${blanks ? 'uc-meta-red' : 'uc-meta-green'}"><b>${blanks}</b> blank field(s)</div>
+        <a class="jira-link" href="${c.url}" target="_blank" rel="noopener">Open & edit in Jira →</a>
+      </div>
+      ${sectionHtml}
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
+}
+
+function renderUpdateCheckSidebar() {
+  if (!STATE.facc) loadSidebarPrefs();
+  const f = STATE.updateFilters;
+  const cards = STATE.updateCards;
+  const opt = (key) => distinct(cards.map((c) => c[key]));
+  const activeCount = f.pse.size + f.status.size + f.kam.size + f.salesRep.size + f.requestCategory.size +
+    (f.completeness !== 'all' ? 1 : 0) + f.sections.size + (f.missingField ? 1 : 0);
+  const sb = document.getElementById('sidebar');
+  sb.style.display = '';
+  sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
+  sb.innerHTML = `
+    <div class="sb-header">
+      <div class="sb-title">Filters${activeCount ? `<span class="facc-badge">${activeCount}</span>` : ''}</div>
+      <button class="sb-toggle" id="sidebarToggleBtn" title="${STATE.sidebarCollapsed ? 'Expand filters' : 'Collapse filters'}">${STATE.sidebarCollapsed ? '»' : '«'}</button>
+    </div>
+    <div class="sb-content" id="sidebarContent" style="display:${STATE.sidebarCollapsed ? 'none' : ''}">
+      <div class="sfgroup">
+        <label>Completeness</label>
+        <select class="fs" id="ucCompleteness">
+          <option value="all" ${f.completeness === 'all' ? 'selected' : ''}>All cards</option>
+          <option value="incomplete" ${f.completeness === 'incomplete' ? 'selected' : ''}>Only incomplete (has blanks)</option>
+          <option value="complete" ${f.completeness === 'complete' ? 'selected' : ''}>Only complete</option>
+        </select>
+      </div>
+      <div class="sfgroup">
+        <label>Missing a specific field</label>
+        <select class="fs" id="ucMissingField">
+          <option value="">Any / none</option>
+          ${UC_ALL_COLS.map((col) => `<option value="${col.key}" ${f.missingField === col.key ? 'selected' : ''}>${col.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="sfgroup">
+        <label>Show sections</label>
+        <div class="sf-opts">
+          ${UC_SECTIONS.map((s) => `<label class="sf-opt"><input type="checkbox" data-uc-section="${s.key}" ${f.sections.has(s.key) ? 'checked' : ''}/><span>${s.label}</span></label>`).join('')}
+        </div>
+        <div style="font-size:10px;color:var(--t3)">None checked = show all</div>
+      </div>
+      ${faccGroup('pse', 'PSE', checkboxListHtml('pse', distinct(cards.map((c) => c.assignee)), f.pse), f.pse.size)}
+      ${faccGroup('status', 'Status', checkboxListHtml('status', distinct(cards.map((c) => c.status)), f.status), f.status.size)}
+      ${faccGroup('kam', 'KAM', checkboxListHtml('kam', opt('kam'), f.kam), f.kam.size)}
+      ${faccGroup('salesRep', 'Sales Representative', checkboxListHtml('salesRep', opt('salesRep'), f.salesRep), f.salesRep.size)}
+      ${faccGroup('requestCategory', 'Request Category', checkboxListHtml('requestCategory', opt('requestCategory'), f.requestCategory), f.requestCategory.size)}
+      <button class="clear-btn-full" id="clearUcFiltersBtn">Clear all filters</button>
+    </div>`;
+
+  document.getElementById('sidebarToggleBtn').addEventListener('click', () => {
+    STATE.sidebarCollapsed = !STATE.sidebarCollapsed;
+    localStorage.setItem('psv_sidebar_collapsed', STATE.sidebarCollapsed ? '1' : '0');
+    renderUpdateCheckSidebar();
+  });
+  if (STATE.sidebarCollapsed) return;
+
+  document.getElementById('ucCompleteness').addEventListener('change', (e) => { STATE.updateFilters.completeness = e.target.value; renderUpdateCheckView(); });
+  document.getElementById('ucMissingField').addEventListener('change', (e) => { STATE.updateFilters.missingField = e.target.value; renderUpdateCheckView(); });
+  document.querySelectorAll('[data-uc-section]').forEach((cb) => cb.addEventListener('change', () => {
+    const k = cb.dataset.ucSection;
+    if (cb.checked) STATE.updateFilters.sections.add(k); else STATE.updateFilters.sections.delete(k);
+    renderUpdateCheckView();
+  }));
+
+  document.querySelectorAll('[data-facc-toggle]').forEach((head) => {
+    head.addEventListener('click', () => {
+      const id = head.dataset.faccToggle;
+      STATE.facc[id] = !STATE.facc[id];
+      localStorage.setItem('psv_facc_' + id, STATE.facc[id] ? '1' : '0');
+      head.closest('.facc').classList.toggle('open', STATE.facc[id]);
+    });
+  });
+  document.querySelectorAll('#sidebar [data-mgroup]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const set = STATE.updateFilters[cb.dataset.mgroup];
+      if (cb.checked) set.add(cb.value); else set.delete(cb.value);
+      renderUpdateCheckView();
+    });
+  });
+  document.getElementById('clearUcFiltersBtn').addEventListener('click', () => {
+    STATE.updateFilters = { pse: new Set(), status: new Set(), kam: new Set(), salesRep: new Set(), requestCategory: new Set(), completeness: 'all', sections: new Set(), missingField: '' };
+    renderUpdateCheckView();
+  });
+}
+
 // ---------- card modal ----------
 function openCardModal(key) {
   const issue = STATE.data.issues.find((i) => i.key === key);
@@ -2712,7 +3011,7 @@ function render() {
   // Links or Activity Log — those routes swap the same sidebar element for
   // their own filter set instead (see renderQuickLinksSidebar /
   // renderActivitySidebar). Restore the normal Jira sidebar for every other tab.
-  if (!['links', 'activity', 'tracker', 'tat'].includes(STATE.route.name)) renderSidebar();
+  if (!['links', 'activity', 'tracker', 'tat', 'update'].includes(STATE.route.name)) renderSidebar();
 
   if (STATE.route.name === 'status') renderStatusDrilldown(STATE.route.param);
   else if (STATE.route.name === 'segment') renderSegment(STATE.route.param);
@@ -2726,6 +3025,7 @@ function render() {
   else if (STATE.route.name === 'c3m') renderC3m();
   else if (STATE.route.name === 'tracker') renderTracker();
   else if (STATE.route.name === 'links') renderQuickLinks();
+  else if (STATE.route.name === 'update') renderUpdateCheck();
   else renderOverview();
 }
 

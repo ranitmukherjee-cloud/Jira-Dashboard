@@ -5,6 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { getLiveData } = require('./lib/live');
+const { UPDATE_CHECK_STATUSES } = require('./lib/jira');
 const { listTasks, createTask, updateTask, deleteTask, listLeave, setLeaveStatus, listHolidays, setHolidayStatus } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
 const { listLinks, addLink, updateLink, reorderLinks, deleteLink, listGroups, createGroup, renameGroup, deleteGroup } = require('./lib/quickLinks');
@@ -70,10 +71,23 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/data', async (req, res) => {
   try {
-    res.json(await getLiveData());
+    const { allCards, ...data } = await getLiveData(); // strip allCards (Update Check tab only)
+    res.json(data);
   } catch (err) {
     console.error('Live data fetch failed:', err.message);
     res.status(500).json({ generatedAt: null, count: 0, issues: [], error: err.message });
+  }
+});
+
+// Jira Update Check — full assigned set filtered to the sanity-check statuses.
+app.get('/api/update-check', async (req, res) => {
+  try {
+    const { allCards, generatedAt } = await getLiveData();
+    const cards = (allCards || []).filter((c) => UPDATE_CHECK_STATUSES.includes(c.status));
+    res.json({ generatedAt, count: cards.length, cards });
+  } catch (err) {
+    console.error('Update Check fetch failed:', err.message);
+    res.status(500).json({ generatedAt: null, count: 0, cards: [], error: err.message });
   }
 });
 
