@@ -40,6 +40,7 @@ const STATE = {
   updateCards: [],
   updateFilters: { pse: new Set(), status: new Set(), kam: new Set(), salesRep: new Set(), requestCategory: new Set(), completeness: 'all', sections: new Set(), missingField: '' },
   updateCollapsed: new Set(), // PSE panels collapsed on the Jira Update Check tab
+  ucSectionCollapsed: new Set(), // section columns (discovery/solutioning/details) collapsed
   route: { name: 'overview', param: null },
   adhoc: null,
   charts: [],
@@ -2677,6 +2678,9 @@ function ucIsBlank(v, type) {
 function ucBlanksCount(card) {
   return UC_ALL_COLS.reduce((n, c) => n + (ucIsBlank(card[c.key], c.type) ? 1 : 0), 0);
 }
+function ucSectionBlanks(card, section) {
+  return section.cols.reduce((n, c) => n + (ucIsBlank(card[c.key], c.type) ? 1 : 0), 0);
+}
 function ucCellContent(card, col) {
   const v = card[col.key];
   if (col.type === 'arr') return v.join(', ');
@@ -2732,6 +2736,7 @@ function renderUpdateCheckView() {
   renderUpdateCheckSidebar();
   const cards = applyUpdateFilters(STATE.updateCards);
   const sections = ucVisibleSections();
+  const isSecCollapsed = (k) => STATE.ucSectionCollapsed.has(k);
 
   // Group by PSE.
   const byPse = {};
@@ -2741,14 +2746,49 @@ function renderUpdateCheckView() {
   const totalBlanks = cards.reduce((n, c) => n + ucBlanksCount(c), 0);
   const incomplete = cards.filter((c) => ucBlanksCount(c) > 0).length;
 
+  // ---- live stat boxes ----
+  const sectionBlankTotals = UC_SECTIONS.map((s) => [s, cards.reduce((n, c) => n + ucSectionBlanks(c, s), 0)]);
+  const pseBlankTotals = pseNames.map((p) => [p, byPse[p].reduce((n, c) => n + ucBlanksCount(c), 0), byPse[p].length]);
+  const byStatus = {};
+  cards.forEach((c) => { (byStatus[c.status] = byStatus[c.status] || []).push(c); });
+  const statusBlankTotals = Object.keys(byStatus).sort().map((s) => [s, byStatus[s].reduce((n, c) => n + ucBlanksCount(c), 0), byStatus[s].length]);
+
+  const headlineBoxes = `
+    <div class="uc-stat-box uc-sb-total"><span class="uc-sb-n">${totalBlanks}</span><span class="uc-sb-l">Total Blank Fields</span></div>
+    <div class="uc-stat-box"><span class="uc-sb-n">${cards.length}</span><span class="uc-sb-l">Cards</span></div>
+    <div class="uc-stat-box uc-sb-red"><span class="uc-sb-n">${incomplete}</span><span class="uc-sb-l">Incomplete</span></div>
+    <div class="uc-stat-box uc-sb-green"><span class="uc-sb-n">${cards.length - incomplete}</span><span class="uc-sb-l">Complete</span></div>`;
+  const sectionBoxes = sectionBlankTotals.map(([s, n]) => `
+    <div class="uc-stat-box uc-sb-sec uc-sb-${s.key}"><span class="uc-sb-n">${n}</span><span class="uc-sb-l">${s.label}</span></div>`).join('');
+  const pseBoxes = pseBlankTotals.map(([p, n, cnt]) => `
+    <div class="uc-stat-box uc-sb-click ${STATE.updateFilters.pse.has(p) ? 'sel' : ''} ${n ? 'uc-sb-red' : 'uc-sb-green'}" data-uc-pbox="${escapeAttr(p)}" title="Filter to ${p}">
+      <span class="uc-sb-n">${n}</span><span class="uc-sb-l">${p} · ${cnt} card(s)</span></div>`).join('');
+  const statusBoxes = statusBlankTotals.map(([s, n, cnt]) => `
+    <div class="uc-stat-box uc-sb-click ${STATE.updateFilters.status.has(s) ? 'sel' : ''} ${n ? 'uc-sb-amber' : 'uc-sb-green'}" data-uc-sbox="${escapeAttr(s)}" title="Filter to ${s}">
+      <span class="uc-sb-n">${n}</span><span class="uc-sb-l">${s} · ${cnt}</span></div>`).join('');
+
+  const statsHtml = `
+    <div class="uc-stats">
+      <div class="uc-stat-row">${headlineBoxes}</div>
+      <div class="uc-stat-cap">Blanks by Section</div>
+      <div class="uc-stat-row">${sectionBoxes}</div>
+      <div class="uc-stat-cap">Blanks by PSE <span class="uc-cap-hint">(click to filter)</span></div>
+      <div class="uc-stat-row">${pseBoxes || '<span class="uc-blank-txt">—</span>'}</div>
+      <div class="uc-stat-cap">Blanks by Status <span class="uc-cap-hint">(click to filter)</span></div>
+      <div class="uc-stat-row">${statusBoxes || '<span class="uc-blank-txt">—</span>'}</div>
+    </div>`;
+
+  // ---- table header with collapsible, clearly-separated section groups ----
   const groupHead = `<tr>
       <th class="uc-sticky" rowspan="2">Card</th>
       <th rowspan="2">Client</th>
       <th rowspan="2">Status</th>
       <th rowspan="2">Blanks</th>
-      ${sections.map((s) => `<th class="uc-group uc-group-${s.key}" colspan="${s.cols.length}">${s.label}</th>`).join('')}
+      ${sections.map((s) => isSecCollapsed(s.key)
+        ? `<th class="uc-group uc-group-${s.key} uc-sec-start uc-group-collapsed" data-uc-seccollapse="${s.key}" title="Expand ${s.label}" rowspan="2">▸ ${s.label}</th>`
+        : `<th class="uc-group uc-group-${s.key} uc-sec-start" data-uc-seccollapse="${s.key}" colspan="${s.cols.length}" title="Collapse ${s.label}">${s.label} ▾</th>`).join('')}
     </tr>
-    <tr>${sections.map((s) => s.cols.map((c) => `<th class="uc-fh uc-fh-${s.key}">${c.label}</th>`).join('')).join('')}</tr>`;
+    <tr>${sections.map((s) => isSecCollapsed(s.key) ? '' : s.cols.map((c, ci) => `<th class="uc-fh uc-fh-${s.key} ${ci === 0 ? 'uc-sec-start' : ''}">${c.label}</th>`).join('')).join('')}</tr>`;
 
   const panels = pseNames.map((pse) => {
     const list = byPse[pse].slice().sort((a, b) => ucBlanksCount(b) - ucBlanksCount(a));
@@ -2761,12 +2801,19 @@ function renderUpdateCheckView() {
         <td class="uc-client">${c.summary || '<span class="uc-blank-txt">—</span>'}</td>
         <td>${fbadge(c.status)}</td>
         <td><span class="uc-blanks ${blanks ? 'has' : 'none'}">${blanks || '✓'}</span></td>
-        ${sections.map((s) => s.cols.map((col) => {
-          const blank = ucIsBlank(c[col.key], col.type);
-          return blank
-            ? `<td class="uc-cell uc-blank" title="${col.label} is empty — fill it in Jira">—</td>`
-            : `<td class="uc-cell">${ucCellContent(c, col)}</td>`;
-        }).join('')).join('')}
+        ${sections.map((s) => {
+          if (isSecCollapsed(s.key)) {
+            const sb = ucSectionBlanks(c, s);
+            return `<td class="uc-cell uc-sec-start uc-seccol ${sb ? 'uc-blank' : ''}" title="${s.label}: ${sb} blank field(s)">${sb || '✓'}</td>`;
+          }
+          return s.cols.map((col, ci) => {
+            const blank = ucIsBlank(c[col.key], col.type);
+            const startCls = ci === 0 ? 'uc-sec-start' : '';
+            return blank
+              ? `<td class="uc-cell uc-blank ${startCls}" title="${col.label} is empty — fill it in Jira">—</td>`
+              : `<td class="uc-cell ${startCls}">${ucCellContent(c, col)}</td>`;
+          }).join('');
+        }).join('')}
       </tr>`;
     }).join('');
     return `
@@ -2774,7 +2821,8 @@ function renderUpdateCheckView() {
         <div class="uc-panel-head ${collapsed ? 'collapsed' : ''}" data-uc-toggle="${escapeAttr(pse)}">
           <span class="uc-chev">▸</span>
           <span class="uc-panel-name">${pse}</span>
-          <span class="uc-panel-meta">${list.length} card(s) · <span class="${pseBlanks ? 'uc-meta-red' : 'uc-meta-green'}">${pseBlanks} blank field(s)</span></span>
+          <span class="uc-pb">${list.length} card(s)</span>
+          <span class="uc-pb ${pseBlanks ? 'uc-pb-red' : 'uc-pb-green'}">${pseBlanks} blank field(s)</span>
         </div>
         ${collapsed ? '' : `<div class="uc-panel-body"><div class="tw uc-tw"><table class="uc-table"><thead>${groupHead}</thead><tbody>${rows}</tbody></table></div></div>`}
       </div>`;
@@ -2785,14 +2833,10 @@ function renderUpdateCheckView() {
       <div class="ph">
         <div class="ph-text">
           <div class="pht">Jira Update Check</div>
-          <div class="phs">Field-completeness sanity check · live from Jira · <b>${cards.length}</b> cards · <b class="uc-meta-red">${totalBlanks}</b> blank fields across <b>${incomplete}</b> incomplete card(s) · red cells are empty — click a card's key to open it in Jira and fill it</div>
-        </div>
-        <div class="uc-summary">
-          <div class="uc-sum-cell"><span class="uc-sum-n">${cards.length}</span><span class="uc-sum-l">Cards</span></div>
-          <div class="uc-sum-cell uc-sum-red"><span class="uc-sum-n">${incomplete}</span><span class="uc-sum-l">Incomplete</span></div>
-          <div class="uc-sum-cell uc-sum-green"><span class="uc-sum-n">${cards.length - incomplete}</span><span class="uc-sum-l">Complete</span></div>
+          <div class="phs">Field-completeness sanity check · live from Jira · red cells are empty — click a card's key to open it in Jira and fill it · collapse a section (▾) to focus on one at a time</div>
         </div>
       </div>
+      ${statsHtml}
       ${panels}
     </div>`;
 
@@ -2801,6 +2845,32 @@ function renderUpdateCheckView() {
       const pse = head.dataset.ucToggle;
       if (STATE.updateCollapsed.has(pse)) STATE.updateCollapsed.delete(pse);
       else STATE.updateCollapsed.add(pse);
+      renderUpdateCheckView();
+    });
+  });
+
+  document.querySelectorAll('[data-uc-seccollapse]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const k = th.dataset.ucSeccollapse;
+      if (STATE.ucSectionCollapsed.has(k)) STATE.ucSectionCollapsed.delete(k);
+      else STATE.ucSectionCollapsed.add(k);
+      renderUpdateCheckView();
+    });
+  });
+
+  document.querySelectorAll('[data-uc-pbox]').forEach((box) => {
+    box.addEventListener('click', () => {
+      const p = box.dataset.ucPbox;
+      if (STATE.updateFilters.pse.has(p)) STATE.updateFilters.pse.delete(p);
+      else STATE.updateFilters.pse.add(p);
+      renderUpdateCheckView();
+    });
+  });
+  document.querySelectorAll('[data-uc-sbox]').forEach((box) => {
+    box.addEventListener('click', () => {
+      const s = box.dataset.ucSbox;
+      if (STATE.updateFilters.status.has(s)) STATE.updateFilters.status.delete(s);
+      else STATE.updateFilters.status.add(s);
       renderUpdateCheckView();
     });
   });

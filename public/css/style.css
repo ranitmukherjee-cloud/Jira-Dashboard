@@ -417,3 +417,36 @@ tr.row-early:hover td{background:#D6F5E3 !important;}
 .uc-detail-field.uc-blank{background:var(--rb);border-color:#F6C9D3;}
 .uc-detail-label{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--t3);margin-bottom:3px;}
 .uc-detail-value{font-size:13px;font-weight:600;color:var(--t1);word-break:break-word;}
+
+/* Update Check — live stat boxes */
+.uc-stats{margin-bottom:18px;}
+.uc-stat-cap{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:var(--t3);margin:14px 0 8px;}
+.uc-cap-hint{font-weight:600;text-transform:none;letter-spacing:0;color:var(--bdr2);}
+.uc-stat-row{display:flex;flex-wrap:wrap;gap:9px;}
+.uc-stat-box{display:flex;flex-direction:column;justify-content:center;min-width:96px;padding:11px 14px;border-radius:11px;border:1.5px solid var(--bdr);background:var(--w);box-shadow:var(--e1);}
+.uc-sb-n{font-size:22px;font-weight:900;line-height:1;color:var(--n);}
+.uc-sb-l{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--t3);margin-top:5px;}
+.uc-sb-total{background:linear-gradient(135deg,#0B1220,#141D33);border:none;}
+.uc-sb-total .uc-sb-n{color:#fff;}.uc-sb-total .uc-sb-l{color:#AEB9D0;}
+.uc-sb-red{background:var(--rb);border-color:#F6C9D3;}.uc-sb-red .uc-sb-n{color:var(--r);}
+.uc-sb-green{background:var(--gb);border-color:#A7E3C3;}.uc-sb-green .uc-sb-n{color:#047857;}
+.uc-sb-amber{background:var(--ab);border-color:#FCD9A8;}.uc-sb-amber .uc-sb-n{color:#B45309;}
+.uc-sb-discovery{border-color:var(--b20);}.uc-sb-discovery .uc-sb-n{color:var(--b);}
+.uc-sb-solutioning{border-color:#DDD6FE;}.uc-sb-solutioning .uc-sb-n{color:var(--pu);}
+.uc-sb-details{border-color:#99E6E2;}.uc-sb-details .uc-sb-n{color:#0EA5A0;}
+.uc-sb-click{cursor:pointer;transition:transform .12s,box-shadow .12s;}
+.uc-sb-click:hover{transform:translateY(-2px);box-shadow:var(--e2);}
+.uc-sb-click.sel{outline:2px solid var(--b);outline-offset:1px;}
+
+/* Update Check — inline PSE header badges */
+.uc-pb{font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:20px;background:rgba(255,255,255,.14);color:#DCE3F2;margin-left:8px;}
+.uc-pb-red{background:rgba(255,143,163,.2);color:#FF8FA3;}
+.uc-pb-green{background:rgba(110,231,183,.18);color:#6EE7B7;}
+
+/* Update Check — prominent section separators + collapsible section columns */
+.uc-table th.uc-sec-start,.uc-table td.uc-sec-start{border-left:3px solid var(--n2) !important;}
+.uc-table th.uc-group.uc-sec-start{cursor:pointer;user-select:none;}
+.uc-table th.uc-group.uc-sec-start:hover{filter:brightness(1.12);}
+.uc-group-collapsed{writing-mode:vertical-rl;transform:rotate(180deg);text-align:center;padding:10px 6px !important;letter-spacing:1px;}
+.uc-seccol{text-align:center;font-weight:800;color:#047857;background:var(--gb);}
+.uc-seccol.uc-blank{color:var(--r);background:var(--rb);}
