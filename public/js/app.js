@@ -1,6 +1,6 @@
 // PSV Dashboard — vanilla JS SPA. All data comes live from /api/data (backed by Jira).
 const QUARTER_START = '2026-05-01';
-const TRACKER_PSE_ROWS = ['Ankith', 'Avani', 'Dhananjay', 'Karan', 'Surabhi', 'Utkarsh'];
+const TRACKER_PSE_ROWS = ['Ankith', 'Apoorv', 'Avani', 'Dhananjay', 'Karan', 'Ranit', 'Surabhi', 'Utkarsh'];
 
 // A fresh universal-filter bucket. Each tab that uses the shared sidebar keeps
 // its OWN bucket (see STATE.tabFilters), so a PSE/status/etc. selection on one
@@ -1955,7 +1955,7 @@ function renderTrackerView() {
       <div class="ph">
         <div class="ph-text">
           <div class="pht">Daily Task Tracker</div>
-          <div class="phs">One sheet per PSE · in-progress tasks carry forward automatically until marked Done · rows in red missed their committed due date (${overdueTotal})</div>
+          <div class="phs">One sheet per PSE · in-progress tasks carry forward automatically until marked Done · rows in red are past their due date (${overdueTotal})</div>
         </div>
         ${summaryPanel}
       </div>
