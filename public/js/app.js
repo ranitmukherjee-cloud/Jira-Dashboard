@@ -1769,7 +1769,8 @@ function trackerRow(t, day) {
           <option value="true" ${t.helpInSow ? 'selected' : ''}>Yes</option>
         </select>
       </td>
-      <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="blocker" rows="1" placeholder="Remarks…">${escapeHtml(t.blocker || '')}</textarea></td>
+      <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="blocker" rows="1" placeholder="Blocker…">${escapeHtml(t.blocker || '')}</textarea></td>
+      <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="remarks" rows="1" placeholder="Remarks…">${escapeHtml(t.remarks || '')}</textarea></td>
       <td class="tk-cell"><button class="tk-del" data-del-id="${t.id}" title="Delete task">✕</button></td>
     </tr>`;
 }
@@ -1946,8 +1947,8 @@ function renderTrackerView() {
           ? '<div class="tw"><div class="empty">Marked on leave for this working day</div></div>'
           : `<div class="tw">
         <table class="tk-table">
-          <thead><tr><th style="width:30%">Task Name</th><th title="The task appears from this day onward; change it to move the task to another day's page">Task Start Date</th><th>Status</th><th>Due Date</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:22%">Blocker</th><th></th></tr></thead>
-          <tbody>${rows.map((t) => trackerRow(t, day)).join('') || '<tr><td colspan="8" class="empty">No tasks</td></tr>'}</tbody>
+          <thead><tr><th style="width:26%">Task Name</th><th title="The task appears from this day onward; change it to move the task to another day's page">Task Start Date</th><th>Status</th><th>Due Date</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:16%">Blocker</th><th style="width:16%">Remarks</th><th></th></tr></thead>
+          <tbody>${rows.map((t) => trackerRow(t, day)).join('') || '<tr><td colspan="9" class="empty">No tasks</td></tr>'}</tbody>
         </table>
       </div>
       <div style="padding:10px 16px"><button class="tk-add" data-add-pse="${pse}">+ Add Task</button></div>`
