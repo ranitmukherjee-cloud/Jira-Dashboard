@@ -300,8 +300,11 @@ function downloadCsv(filename, csvString) {
 }
 
 // ---------- chart-click-through to a deal list ----------
-function goToFilteredList(title, predicate) {
-  STATE.adhoc = { title, predicate };
+// raw:true (used by the global search bar) skips the universal filters, so a
+// search always finds a match regardless of whatever filters are active on
+// whichever tab the user started from.
+function goToFilteredList(title, predicate, { raw = false } = {}) {
+  STATE.adhoc = { title, predicate, raw };
   navigate('/list');
 }
 
@@ -703,7 +706,8 @@ function renderAdhocList() {
     document.getElementById('app').innerHTML = '<div class="page"><div class="empty">Nothing to show — go back and click a chart bar or status block.</div></div>';
     return;
   }
-  const rows = applyFilters(STATE.data.issues).filter(ad.predicate);
+  const base = ad.raw ? STATE.data.issues : applyFilters(STATE.data.issues);
+  const rows = base.filter(ad.predicate);
   renderGenericDealTable({
     title: ad.title,
     subtitle: `${rows.length} card(s) matching this selection`,
@@ -3135,6 +3139,27 @@ function switchTab(dir) {
 }
 document.getElementById('prevTabBtn').addEventListener('click', () => switchTab(-1));
 document.getElementById('nextTabBtn').addEventListener('click', () => switchTab(1));
+
+// Global search — present on every tab (outside #app/#sidebar so it survives
+// every re-render), jumps straight to a filtered list of matching deals/cards.
+document.getElementById('globalSearchForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = document.getElementById('globalSearchInput');
+  const q = input.value.trim().toLowerCase();
+  const hint = document.getElementById('globalSearchHint');
+  if (!q) return;
+  const matches = (STATE.data.issues || []).filter((i) =>
+    `${i.key} ${i.summary || ''} ${i.assignee || ''} ${i.kam || ''} ${i.salesRep || ''}`.toLowerCase().includes(q)
+  );
+  if (!matches.length) {
+    hint.textContent = `No deals or cards match "${input.value.trim()}"`;
+    hint.classList.add('show');
+    return;
+  }
+  hint.classList.remove('show');
+  const matchKeys = new Set(matches.map((i) => i.key));
+  goToFilteredList(`Search results for "${input.value.trim()}"`, (i) => matchKeys.has(i.key), { raw: true });
+});
 
 document.getElementById('refreshBtn').addEventListener('click', async () => {
   const btn = document.getElementById('refreshBtn');
