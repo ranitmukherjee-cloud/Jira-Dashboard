@@ -1692,6 +1692,19 @@ function taskVisibleOnDay(task, day) {
   return true;
 }
 
+// A task raised by any OTHER PSE with Flag Apoorv = Yes surfaces as a fixed
+// notification inside Apoorv's own table — a shared record, not a copy: its
+// status stays live-synced with the owning PSE's table (same task id), and
+// Apoorv can also change the status directly from his flagged view.
+function isFlaggedForApoorv(task) {
+  return !!task.flagApoorv && task.pse !== 'Apoorv';
+}
+// Pinned to exactly its Task Start Date and (once set) its Due Date — unlike
+// the normal carry-forward rule, it doesn't recur on every day in between.
+function flaggedVisibleOnDay(task, day) {
+  return day === taskStart(task) || (!!task.dueDate && day === task.dueDate);
+}
+
 function daysBetween(fromStr, toStr) {
   return Math.round((Date.parse(toStr + 'T00:00:00Z') - Date.parse(fromStr + 'T00:00:00Z')) / 86400000);
 }
@@ -1746,7 +1759,7 @@ async function renderTracker() {
   renderTrackerView();
 }
 
-function trackerRow(t, day) {
+function trackerRow(t, day, { hideFlagCol = false } = {}) {
   const overdue = taskOverdue(t, day);
   const rowCls = overdue ? 'row-flagged' : '';
   const statusCls = 'tk-status-' + (t.status || 'Open').toLowerCase().replace(/\s+/g, '-');
@@ -1761,12 +1774,12 @@ function trackerRow(t, day) {
         </select>
       </td>
       <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" lang="en-GB" data-field="dueDate" value="${t.dueDate || ''}" title="Due date (editable)"/></td>
-      <td class="tk-cell">
+      ${hideFlagCol ? '' : `<td class="tk-cell">
         <select class="tk-select tk-select-yn ${t.flagApoorv ? 'yn-yes' : 'yn-no'}" data-field="flagApoorv">
           <option value="false" ${!t.flagApoorv ? 'selected' : ''}>No</option>
           <option value="true" ${t.flagApoorv ? 'selected' : ''}>Yes</option>
         </select>
-      </td>
+      </td>`}
       <td class="tk-cell">
         <select class="tk-select tk-select-yn ${t.helpInSow ? 'yn-yes' : 'yn-no'}" data-field="helpInSow">
           <option value="false" ${!t.helpInSow ? 'selected' : ''}>No</option>
@@ -1776,6 +1789,31 @@ function trackerRow(t, day) {
       <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="blocker" rows="1" placeholder="Blocker…">${escapeHtml(t.blocker || '')}</textarea></td>
       <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="remarks" rows="1" placeholder="Remarks…">${escapeHtml(t.remarks || '')}</textarea></td>
       <td class="tk-cell"><button class="tk-del" data-del-id="${t.id}" title="Delete task">✕</button></td>
+    </tr>`;
+}
+
+// A row in Apoorv's "Flagged for Apoorv" notification table. Status is the
+// SAME field on the SAME task record (data-id + data-field="status" reuse the
+// existing generic save binding), so editing it here writes straight back to
+// the owning PSE's table too — it's one shared record, not a duplicate.
+function flaggedRow(t) {
+  const statusCls = 'tk-status-' + (t.status || 'Open').toLowerCase().replace(/\s+/g, '-');
+  return `
+    <tr data-id="${t.id}" class="tk-flag-row ${t.apoorvSeen ? 'tk-flag-seen' : ''}">
+      <td class="tk-cell tk-cell-name">${escapeHtml(t.dealName || '(unnamed task)')}</td>
+      <td class="tk-cell"><span class="tk-flag-raiser">${t.pse}</span></td>
+      <td class="tk-cell">${new Date(taskStart(t) + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
+      <td class="tk-cell">
+        <select class="tk-select tk-select-status ${statusCls}" data-field="status">
+          ${['Open', 'In Progress', 'Done'].map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td class="tk-cell tk-cell-seen">
+        <label class="tk-seen-label" title="Mark as seen by Apoorv">
+          <input type="checkbox" class="tk-input tk-seen-cb" data-field="apoorvSeen" ${t.apoorvSeen ? 'checked' : ''}/>
+          <span>${t.apoorvSeen ? 'Seen ✓' : 'Mark seen'}</span>
+        </label>
+      </td>
     </tr>`;
 }
 
@@ -1936,10 +1974,38 @@ function renderTrackerView() {
 
   const pseSections = pses.map((pse) => {
     const onLeave = !!leave[`${pse}|${day}`];
+    const isApoorv = pse === 'Apoorv';
     const rows = tasksForPse
       .filter((t) => t.pse === pse && taskVisibleOnDay(t, day) && trackerRowMatchesFilters(t))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+    // Flagged-for-Apoorv notifications bypass the PSE/status filters and the
+    // sidebar's PSE selection entirely (a fixed personal inbox for Apoorv),
+    // and are sourced from ALL tasks, not just this filtered/visible set.
+    const flaggedPanel = isApoorv
+      ? (() => {
+          const flagged = allTasks
+            .filter((t) => isFlaggedForApoorv(t) && flaggedVisibleOnDay(t, day))
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+          if (!flagged.length) return '';
+          return `
+      <div class="tc tk-flag-panel">
+        <div class="th tk-flag-head">
+          <span class="tht">🚩 Flagged for Apoorv</span>
+          <span class="ths">${flagged.length} task(s) raised by other PSEs · shown on their Task Start Date and Due Date</span>
+        </div>
+        <div class="tw">
+          <table class="tk-table tk-flag-table">
+            <thead><tr><th style="width:32%">Task Name</th><th>Raised By</th><th>Task Start Date</th><th>Status</th><th>Seen</th></tr></thead>
+            <tbody>${flagged.map(flaggedRow).join('')}</tbody>
+          </table>
+        </div>
+      </div>`;
+        })()
+      : '';
+
     return `
+    ${flaggedPanel}
     <div class="tc ${onLeave ? 'tk-onleave' : ''}">
       <div class="th">
         <span class="tht">${pse}</span>
@@ -1951,8 +2017,8 @@ function renderTrackerView() {
           ? '<div class="tw"><div class="empty">Marked on leave for this working day</div></div>'
           : `<div class="tw">
         <table class="tk-table">
-          <thead><tr><th style="width:26%">Task Name</th><th title="The task appears from this day onward; change it to move the task to another day's page">Task Start Date</th><th>Status</th><th>Due Date</th><th>Flag Apoorv</th><th>Help in SOW</th><th style="width:16%">Blocker</th><th style="width:16%">Remarks</th><th></th></tr></thead>
-          <tbody>${rows.map((t) => trackerRow(t, day)).join('') || '<tr><td colspan="9" class="empty">No tasks</td></tr>'}</tbody>
+          <thead><tr><th style="width:26%">Task Name</th><th title="The task appears from this day onward; change it to move the task to another day's page">Task Start Date</th><th>Status</th><th>Due Date</th>${isApoorv ? '' : '<th>Flag Apoorv</th>'}<th>Help in SOW</th><th style="width:16%">Blocker</th><th style="width:16%">Remarks</th><th></th></tr></thead>
+          <tbody>${rows.map((t) => trackerRow(t, day, { hideFlagCol: isApoorv })).join('') || `<tr><td colspan="${isApoorv ? 8 : 9}" class="empty">No tasks</td></tr>`}</tbody>
         </table>
       </div>
       <div style="padding:10px 16px"><button class="tk-add" data-add-pse="${pse}">+ Add Task</button></div>`
@@ -2057,9 +2123,10 @@ function bindTrackerEvents() {
     const row = el.closest('tr');
     const id = row.dataset.id;
     const field = el.dataset.field;
-    const immediate = el.tagName === 'SELECT' || el.type === 'date';
+    const isCheckbox = el.type === 'checkbox';
+    const immediate = el.tagName === 'SELECT' || el.type === 'date' || isCheckbox;
     el.addEventListener(immediate ? 'change' : 'input', () => {
-      let value = el.value;
+      let value = isCheckbox ? el.checked : el.value;
       if (field === 'flagApoorv' || field === 'helpInSow') value = value === 'true';
       saveTrackerField(id, field, value, immediate);
     });
