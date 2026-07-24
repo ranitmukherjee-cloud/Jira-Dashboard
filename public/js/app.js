@@ -1699,12 +1699,12 @@ function taskVisibleOnDay(task, day) {
 function isFlaggedForApoorv(task) {
   return !!task.flagApoorv && task.pse !== 'Apoorv';
 }
-// Status-driven (independent of the "seen" checkbox, which only controls
-// color): while the task isn't Done it recurs every day from its Task Start
-// Date onward so it can't be missed. Once Apoorv marks it Done, it becomes a
-// "hard-surfaced fixed record" shown ONLY on its Task Start Date.
+// Driven entirely by the "seen" checkbox: recurs every day from its Task
+// Start Date onward until Apoorv marks it seen, so it can't be missed. Once
+// checked, it becomes a "hard-surfaced fixed record" shown ONLY on its Task
+// Start Date.
 function flaggedVisibleOnDay(task, day) {
-  if (task.status !== 'Done') return taskStart(task) <= day;
+  if (!task.apoorvSeen) return taskStart(task) <= day;
   return day === taskStart(task);
 }
 
@@ -1803,29 +1803,22 @@ function trackerRow(t, day, { hideFlagCol = false } = {}) {
 // existing generic save binding), so editing it here writes straight back to
 // the owning PSE's table too — it's one shared record, not a duplicate.
 function flaggedRow(t) {
-  const statusCls = 'tk-status-' + (t.status || 'Open').toLowerCase().replace(/\s+/g, '-');
   // Same armed, 2-click confirmation pattern used elsewhere in the app (e.g.
   // Quick Links) but scoped with its own state key so the two don't collide.
   const armed = STATE.flagDeleteId === t.id;
-  // Whole-row color, in precedence order: Done -> light green (terminal state,
-  // wins even if "seen" was never checked); seen (not yet Done) -> green;
-  // otherwise -> red (unseen, needs attention).
-  const isDone = t.status === 'Done';
-  const rowStateCls = isDone ? 'tk-flag-row-done' : t.apoorvSeen ? 'tk-flag-row-acked' : '';
+  // Only color rule: unseen = red, seen = light green.
+  const rowStateCls = t.apoorvSeen ? 'tk-flag-row-seen' : '';
   return `
-    <tr data-id="${t.id}" class="tk-flag-row ${rowStateCls} ${t.apoorvSeen ? 'tk-flag-seen' : ''}">
+    <tr data-id="${t.id}" class="tk-flag-row ${rowStateCls}">
       <td class="tk-cell tk-cell-name">${escapeHtml(t.dealName || '(unnamed task)')}</td>
       <td class="tk-cell"><span class="tk-flag-raiser">${t.pse}</span></td>
       <td class="tk-cell">${new Date(taskStart(t) + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
-      <td class="tk-cell">
-        <select class="tk-select tk-select-status ${statusCls}" data-field="status">
-          ${(t.status === 'Open' ? ['Open', 'In Progress', 'Done'] : ['In Progress', 'Done']).map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
-        </select>
-      </td>
+      <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="remarks" rows="1" placeholder="Remarks…">${escapeHtml(t.remarks || '')}</textarea></td>
       <td class="tk-cell tk-cell-seen">
-        <label class="tk-seen-label" title="Mark as seen by Apoorv">
+        <label class="tk-seen-toggle ${t.apoorvSeen ? 'checked' : ''}" title="Mark as seen by Apoorv">
           <input type="checkbox" class="tk-input tk-seen-cb" data-field="apoorvSeen" ${t.apoorvSeen ? 'checked' : ''}/>
-          <span>${t.apoorvSeen ? 'Seen ✓' : 'Mark seen'}</span>
+          <span class="tk-seen-box"></span>
+          <span class="tk-seen-text">${t.apoorvSeen ? '✓ Seen' : 'Mark Seen'}</span>
         </label>
       </td>
       <td class="tk-cell">
@@ -2009,11 +2002,11 @@ function renderTrackerView() {
       <div class="tc tk-flag-panel">
         <div class="th tk-flag-head">
           <span class="tht">🚩 Flagged for Apoorv</span>
-          <span class="ths">${flagged.length} task(s) raised by other PSEs · shown daily until marked Done, then pinned to its Task Start Date only · red = unseen, green = seen, light green = Done</span>
+          <span class="ths">${flagged.length} task(s) raised by other PSEs · shown daily until marked Seen, then pinned to its Task Start Date only · red = unseen, light green = seen</span>
         </div>
         <div class="tw">
           <table class="tk-table tk-flag-table">
-            <thead><tr><th style="width:32%">Task Name</th><th>Raised By</th><th>Task Start Date</th><th>Status</th><th>Seen</th><th></th></tr></thead>
+            <thead><tr><th style="width:26%">Task Name</th><th>Raised By</th><th>Task Start Date</th><th style="width:28%">Remarks</th><th>Seen</th><th></th></tr></thead>
             <tbody>${flagged.map(flaggedRow).join('')}</tbody>
           </table>
         </div>

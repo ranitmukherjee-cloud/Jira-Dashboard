@@ -259,18 +259,21 @@ td.tk-cell{padding:2px 4px;}
 .tk-flag-panel{border:1.5px solid #F6C9D3;box-shadow:0 0 0 1px rgba(225,29,72,.06),var(--e1);}
 .tk-flag-head{background:linear-gradient(135deg,#E11D48 0%,#B91C4A 100%) !important;}
 .tk-flag-table thead th{background:#FEF1F4;color:var(--r);}
-/* Whole-row color by state: unseen = red, seen (not Done) = green, Done = light green. */
+/* Whole-row color: unseen = red, seen = light green. Only rule. */
 .tk-flag-row td{background:var(--rb);}
 .tk-flag-row:hover td{background:#FDE1E8;}
-.tk-flag-row.tk-flag-row-acked td{background:#BBF7D0;}
-.tk-flag-row.tk-flag-row-acked:hover td{background:#A0EEBF;}
-.tk-flag-row.tk-flag-row-done td{background:var(--gb);opacity:.85;}
-.tk-flag-row.tk-flag-row-done:hover td{background:#DFF6E7;}
+.tk-flag-row.tk-flag-row-seen td{background:var(--gb);}
+.tk-flag-row.tk-flag-row-seen:hover td{background:#DFF6E7;}
 .tk-flag-raiser{font-weight:800;color:var(--n);background:var(--nl);border-radius:20px;padding:2px 10px;font-size:11px;}
-.tk-seen-label{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11.5px;font-weight:700;color:var(--t2);white-space:nowrap;}
-.tk-seen-cb{width:15px;height:15px;cursor:pointer;accent-color:var(--r);}
-.tk-flag-seen .tk-seen-label{color:#047857;}
-.tk-flag-seen .tk-seen-cb{accent-color:#047857;}
+
+/* Prominent "Mark Seen" toggle — bigger checkbox, pill-styled, clearly a call to action */
+.tk-seen-toggle{position:relative;display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;font-weight:800;white-space:nowrap;padding:6px 12px;border-radius:20px;border:2px solid var(--r);color:var(--r);background:#fff;transition:all .15s;}
+.tk-seen-toggle:hover{background:var(--rb);}
+.tk-seen-toggle .tk-seen-cb{position:absolute;opacity:0;width:0;height:0;}
+.tk-seen-toggle .tk-seen-box{width:18px;height:18px;border-radius:5px;border:2px solid currentColor;flex-shrink:0;position:relative;}
+.tk-seen-toggle.checked{border-color:#047857;color:#047857;background:var(--gb);}
+.tk-seen-toggle.checked .tk-seen-box{background:#047857;border-color:#047857;}
+.tk-seen-toggle.checked .tk-seen-box::after{content:'✓';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:900;}
 .tk-flag-del{background:none;border:none;color:var(--t3);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:5px;transition:all .15s;}
 .tk-flag-del:hover{background:var(--rb);color:var(--r);}
 .tk-flag-del.armed{background:var(--r);color:#fff;font-size:10px;font-weight:800;padding:3px 9px;border-radius:20px;}
