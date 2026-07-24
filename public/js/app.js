@@ -3090,7 +3090,11 @@ document.getElementById('modalOverlay').addEventListener('click', (e) => {
 function render() {
   document.querySelectorAll('.nt').forEach((t) => t.classList.remove('active'));
   const navName = ['status', 'segment', 'list'].includes(STATE.route.name) ? 'overview' : STATE.route.name;
-  document.querySelector(`.nt[data-route="${navName}"]`)?.classList.add('active');
+  const activeNt = document.querySelector(`.nt[data-route="${navName}"]`);
+  activeNt?.classList.add('active');
+  // Keep the fixed header's current-tab label in sync.
+  const curTabEl = document.getElementById('curTab');
+  if (curTabEl && activeNt) curTabEl.textContent = activeNt.textContent;
 
   // The universal Jira filters (PSE, Status, KAM, etc.) don't apply to Quick
   // Links or Activity Log — those routes swap the same sidebar element for
@@ -3117,6 +3121,19 @@ function render() {
 document.querySelectorAll('.nt').forEach((t) => {
   t.addEventListener('click', () => navigate(t.dataset.route === 'overview' ? '/' : `/${t.dataset.route}`));
 });
+
+// Prev/Next quick tab switching (wraps around), following the visible nav order.
+function switchTab(dir) {
+  const routes = [...document.querySelectorAll('.nt')].map((n) => n.dataset.route);
+  const navName = ['status', 'segment', 'list'].includes(STATE.route.name) ? 'overview' : STATE.route.name;
+  let idx = routes.indexOf(navName);
+  if (idx === -1) idx = 0;
+  idx = (idx + dir + routes.length) % routes.length;
+  const route = routes[idx];
+  navigate(route === 'overview' ? '/' : `/${route}`);
+}
+document.getElementById('prevTabBtn').addEventListener('click', () => switchTab(-1));
+document.getElementById('nextTabBtn').addEventListener('click', () => switchTab(1));
 
 document.getElementById('refreshBtn').addEventListener('click', async () => {
   const btn = document.getElementById('refreshBtn');

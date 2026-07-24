@@ -20,7 +20,14 @@ body{background:var(--bg);color:var(--t1);font-family:'Inter',-apple-system,Blin
 .brand .go{color:var(--b2);}
 .tsep{width:1px;height:24px;background:rgba(255,255,255,.14);}
 .tlbl{font-size:11px;font-weight:600;color:rgba(255,255,255,.5);letter-spacing:.3px;text-transform:uppercase;}
+/* Current-tab indicator in the fixed header */
+.cur-tab{font-size:14px;font-weight:800;color:#fff;letter-spacing:.2px;background:linear-gradient(135deg,rgba(59,91,255,.9),rgba(124,58,237,.9));padding:5px 14px;border-radius:8px;white-space:nowrap;}
 .tr{display:flex;align-items:center;gap:12px;}
+/* Prev/Next tab switcher */
+.tab-switch{display:flex;gap:4px;}
+.tab-nav-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:7px;padding:6px 11px;font-size:11px;font-weight:700;cursor:pointer;transition:background .15s;white-space:nowrap;}
+.tab-nav-btn:hover{background:rgba(255,255,255,.22);}
+@media(max-width:760px){.tlbl,.dlbl{display:none;}}
 .lpill{display:flex;align-items:center;gap:6px;background:rgba(22,163,74,.16);border:1px solid rgba(22,163,74,.32);border-radius:20px;padding:4px 11px;font-size:10px;font-weight:700;color:#4ADE80;letter-spacing:.5px;text-transform:uppercase;}
 .lpill.stale{background:rgba(217,119,6,.16);border-color:rgba(217,119,6,.32);color:#FBBF24;}
 .ldot{width:6px;height:6px;background:currentColor;border-radius:50%;animation:blink 2s infinite;}
@@ -29,8 +36,8 @@ body{background:var(--bg);color:var(--t1);font-family:'Inter',-apple-system,Blin
 .refresh-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);color:#fff;border-radius:7px;padding:6px 11px;font-size:11px;font-weight:600;cursor:pointer;transition:background .15s;}
 .refresh-btn:hover{background:rgba(255,255,255,.18);}
 
-/* NAV — pill-style segmented control */
-.nav{background:var(--w);border-bottom:1px solid var(--bdr);padding:9px 24px;display:flex;gap:5px;overflow-x:auto;box-shadow:var(--e1);}
+/* NAV — pill-style segmented control (sticky under the topbar so tabs stay visible) */
+.nav{background:var(--w);border-bottom:1px solid var(--bdr);padding:9px 24px;display:flex;gap:5px;overflow-x:auto;box-shadow:var(--e1);position:sticky;top:58px;z-index:290;}
 .nt{display:flex;align-items:center;height:36px;padding:0 15px;font-size:11.5px;font-weight:700;color:var(--t2);border-radius:8px;cursor:pointer;white-space:nowrap;letter-spacing:.2px;transition:background .15s,color .15s,box-shadow .15s;}
 .nt:hover{background:var(--bl);color:var(--b);}
 .nt.active{background:var(--b);color:#fff;box-shadow:0 4px 12px rgba(59,91,255,.32);}
