@@ -1819,7 +1819,7 @@ function flaggedRow(t) {
       <td class="tk-cell">${new Date(taskStart(t) + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
       <td class="tk-cell">
         <select class="tk-select tk-select-status ${statusCls}" data-field="status">
-          ${['Open', 'In Progress', 'Done'].map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+          ${(t.status === 'Open' ? ['Open', 'In Progress', 'Done'] : ['In Progress', 'Done']).map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
       </td>
       <td class="tk-cell tk-cell-seen">
