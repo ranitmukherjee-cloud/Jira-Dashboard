@@ -1750,13 +1750,13 @@ function trackerRow(t, day) {
   return `
     <tr data-id="${t.id}" class="${rowCls}">
       <td class="tk-cell tk-cell-name"><textarea class="tk-input tk-textarea" data-field="dealName" rows="1" placeholder="Task name…">${escapeHtml(t.dealName || '')}</textarea></td>
-      <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" data-field="taskStartDate" value="${taskStart(t) || ''}" title="Task Start Date — the task appears from this day onward; change it to move the task to another day"/></td>
+      <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" lang="en-GB" data-field="taskStartDate" value="${taskStart(t) || ''}" title="Task Start Date — the task appears from this day onward; change it to move the task to another day"/></td>
       <td class="tk-cell">
         <select class="tk-select tk-select-status ${statusCls}" data-field="status">
           ${['Open', 'In Progress', 'Done'].map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
       </td>
-      <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" data-field="dueDate" value="${t.dueDate || ''}" title="Due date (editable)"/></td>
+      <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" lang="en-GB" data-field="dueDate" value="${t.dueDate || ''}" title="Due date (editable)"/></td>
       <td class="tk-cell">
         <select class="tk-select tk-select-yn ${t.flagApoorv ? 'yn-yes' : 'yn-no'}" data-field="flagApoorv">
           <option value="false" ${!t.flagApoorv ? 'selected' : ''}>No</option>
@@ -2102,8 +2102,8 @@ function renderTrackerSidebar() {
       <div class="sfgroup">
         <label>Date Bracket (From – To)</label>
         <div class="sf-daterow">
-          <input type="date" class="fi" id="tkDateFrom" value="${f.dateFrom}"/>
-          <input type="date" class="fi" id="tkDateTo" value="${f.dateTo}"/>
+          <input type="date" class="fi" lang="en-GB" id="tkDateFrom" value="${f.dateFrom}"/>
+          <input type="date" class="fi" lang="en-GB" id="tkDateTo" value="${f.dateTo}"/>
         </div>
         <div style="font-size:10px;color:var(--t3)">Adds a "Custom Range" report below</div>
       </div>
