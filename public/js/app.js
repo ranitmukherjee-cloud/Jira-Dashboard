@@ -41,6 +41,7 @@ const STATE = {
   updateFilters: { pse: new Set(), status: new Set(), kam: new Set(), salesRep: new Set(), requestCategory: new Set(), completeness: 'all', sections: new Set(), missingField: '' },
   updateCollapsed: new Set(), // PSE panels collapsed on the Jira Update Check tab
   ucSectionCollapsed: new Set(), // section columns (discovery/solutioning/details) collapsed
+  ucStatsCollapsed: false, // the top stat-boxes section on Jira Update Check
   route: { name: 'overview', param: null },
   adhoc: null,
   charts: [],
@@ -2767,15 +2768,23 @@ function renderUpdateCheckView() {
     <div class="uc-stat-box uc-sb-click ${STATE.updateFilters.status.has(s) ? 'sel' : ''} ${n ? 'uc-sb-amber' : 'uc-sb-green'}" data-uc-sbox="${escapeAttr(s)}" title="Filter to ${s}">
       <span class="uc-sb-n">${n}</span><span class="uc-sb-l">${s} · ${cnt}</span></div>`).join('');
 
+  const statsCollapsed = STATE.ucStatsCollapsed;
   const statsHtml = `
-    <div class="uc-stats">
-      <div class="uc-stat-row">${headlineBoxes}</div>
-      <div class="uc-stat-cap">Blanks by Section</div>
-      <div class="uc-stat-row">${sectionBoxes}</div>
-      <div class="uc-stat-cap">Blanks by PSE <span class="uc-cap-hint">(click to filter)</span></div>
-      <div class="uc-stat-row">${pseBoxes || '<span class="uc-blank-txt">—</span>'}</div>
-      <div class="uc-stat-cap">Blanks by Status <span class="uc-cap-hint">(click to filter)</span></div>
-      <div class="uc-stat-row">${statusBoxes || '<span class="uc-blank-txt">—</span>'}</div>
+    <div class="uc-stats-wrap">
+      <div class="uc-stats-head ${statsCollapsed ? 'collapsed' : ''}" id="ucStatsToggle" title="${statsCollapsed ? 'Expand' : 'Collapse'} stats">
+        <span class="uc-chev">▸</span>
+        <span class="uc-stats-title">Live Stats Overview</span>
+        <span class="uc-stats-sub"><b class="uc-meta-red">${totalBlanks}</b> blank fields · <b>${cards.length}</b> cards · <b>${incomplete}</b> incomplete</span>
+      </div>
+      ${statsCollapsed ? '' : `<div class="uc-stats">
+        <div class="uc-stat-row">${headlineBoxes}</div>
+        <div class="uc-stat-cap">Blanks by Section</div>
+        <div class="uc-stat-row">${sectionBoxes}</div>
+        <div class="uc-stat-cap">Blanks by PSE <span class="uc-cap-hint">(click to filter)</span></div>
+        <div class="uc-stat-row">${pseBoxes || '<span class="uc-blank-txt">—</span>'}</div>
+        <div class="uc-stat-cap">Blanks by Status <span class="uc-cap-hint">(click to filter)</span></div>
+        <div class="uc-stat-row">${statusBoxes || '<span class="uc-blank-txt">—</span>'}</div>
+      </div>`}
     </div>`;
 
   // ---- table header with collapsible, clearly-separated section groups ----
@@ -2839,6 +2848,12 @@ function renderUpdateCheckView() {
       ${statsHtml}
       ${panels}
     </div>`;
+
+  const statsToggle = document.getElementById('ucStatsToggle');
+  if (statsToggle) statsToggle.addEventListener('click', () => {
+    STATE.ucStatsCollapsed = !STATE.ucStatsCollapsed;
+    renderUpdateCheckView();
+  });
 
   document.querySelectorAll('[data-uc-toggle]').forEach((head) => {
     head.addEventListener('click', () => {
