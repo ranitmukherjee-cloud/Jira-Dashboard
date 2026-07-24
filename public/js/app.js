@@ -1699,13 +1699,13 @@ function taskVisibleOnDay(task, day) {
 function isFlaggedForApoorv(task) {
   return !!task.flagApoorv && task.pse !== 'Apoorv';
 }
-// Until Apoorv marks it seen, the notification recurs on every day (same
-// carry-forward rule as a normal task) so it can't be missed. Only once he
-// checks it off does it become "hard-surfaced as a fixed record" — pinned to
-// exactly its Task Start Date and (once set) its Due Date, nothing in between.
+// Status-driven (independent of the "seen" checkbox, which only controls
+// color): while the task isn't Done it recurs every day from its Task Start
+// Date onward so it can't be missed. Once Apoorv marks it Done, it becomes a
+// "hard-surfaced fixed record" shown ONLY on its Task Start Date.
 function flaggedVisibleOnDay(task, day) {
-  if (!task.apoorvSeen) return taskVisibleOnDay(task, day);
-  return day === taskStart(task) || (!!task.dueDate && day === task.dueDate);
+  if (task.status !== 'Done') return taskStart(task) <= day;
+  return day === taskStart(task);
 }
 
 function daysBetween(fromStr, toStr) {
@@ -1807,8 +1807,13 @@ function flaggedRow(t) {
   // Same armed, 2-click confirmation pattern used elsewhere in the app (e.g.
   // Quick Links) but scoped with its own state key so the two don't collide.
   const armed = STATE.flagDeleteId === t.id;
+  // Whole-row color, in precedence order: Done -> light green (terminal state,
+  // wins even if "seen" was never checked); seen (not yet Done) -> green;
+  // otherwise -> red (unseen, needs attention).
+  const isDone = t.status === 'Done';
+  const rowStateCls = isDone ? 'tk-flag-row-done' : t.apoorvSeen ? 'tk-flag-row-acked' : '';
   return `
-    <tr data-id="${t.id}" class="tk-flag-row ${t.apoorvSeen ? 'tk-flag-seen' : ''}">
+    <tr data-id="${t.id}" class="tk-flag-row ${rowStateCls} ${t.apoorvSeen ? 'tk-flag-seen' : ''}">
       <td class="tk-cell tk-cell-name">${escapeHtml(t.dealName || '(unnamed task)')}</td>
       <td class="tk-cell"><span class="tk-flag-raiser">${t.pse}</span></td>
       <td class="tk-cell">${new Date(taskStart(t) + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
@@ -2004,7 +2009,7 @@ function renderTrackerView() {
       <div class="tc tk-flag-panel">
         <div class="th tk-flag-head">
           <span class="tht">🚩 Flagged for Apoorv</span>
-          <span class="ths">${flagged.length} task(s) raised by other PSEs · shown daily until marked seen, then pinned to Task Start Date & Due Date only</span>
+          <span class="ths">${flagged.length} task(s) raised by other PSEs · shown daily until marked Done, then pinned to its Task Start Date only · red = unseen, green = seen, light green = Done</span>
         </div>
         <div class="tw">
           <table class="tk-table tk-flag-table">
@@ -2206,6 +2211,12 @@ function renderTrackerSidebar() {
       <button class="sb-toggle" id="sidebarToggleBtn" title="${STATE.sidebarCollapsed ? 'Expand filters' : 'Collapse filters'}">${STATE.sidebarCollapsed ? '»' : '«'}</button>
     </div>
     <div class="sb-content" id="sidebarContent" style="display:${STATE.sidebarCollapsed ? 'none' : ''}">
+      <div class="sfgroup">
+        <label class="tk-flagfilter-toggle ${f.flagApoorv === 'true' ? 'active' : ''}">
+          <input type="checkbox" id="tkFlaggedOnlyToggle" ${f.flagApoorv === 'true' ? 'checked' : ''}/>
+          <span>🚩 Flagged For Apoorv</span>
+        </label>
+      </div>
       ${faccGroup('pse', 'PSE', checkboxListHtml('pse', TRACKER_PSE_ROWS, f.pse), f.pse.size)}
       ${faccGroup('status', 'Status', checkboxListHtml('status', ['Open', 'In Progress', 'Done'], f.status), f.status.size)}
 
@@ -2248,6 +2259,7 @@ function renderTrackerSidebar() {
 
   if (STATE.sidebarCollapsed) return;
 
+  document.getElementById('tkFlaggedOnlyToggle').addEventListener('change', (e) => { STATE.trackerFilters.flagApoorv = e.target.checked ? 'true' : ''; renderTrackerView(); });
   document.getElementById('tkHelpSelect').addEventListener('change', (e) => { STATE.trackerFilters.helpInSow = e.target.value; renderTrackerView(); });
   document.getElementById('tkFlagSelect').addEventListener('change', (e) => { STATE.trackerFilters.flagApoorv = e.target.value; renderTrackerView(); });
   document.getElementById('tkDateFrom').addEventListener('change', (e) => { STATE.trackerFilters.dateFrom = e.target.value; renderTrackerView(); });
