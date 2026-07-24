@@ -130,9 +130,13 @@ body{background:var(--bg);color:var(--t1);font-family:'Inter',-apple-system,Blin
 .tat-section .sht{font-size:14px;}
 .tat-sub{margin-bottom:10px;}
 .tat-blank{color:var(--bdr2);}
+.tat-table thead th{background:var(--n);color:#fff;font-size:10.5px;font-weight:800;letter-spacing:.5px;border-bottom:none;border-right:1px solid rgba(255,255,255,.16);}
+.tat-table thead th:last-child{border-right:none;}
+.tat-table td{border-right:1px solid var(--nl);}
+.tat-table td:last-child{border-right:none;}
 .tat-table th.tat-th{cursor:pointer;user-select:none;transition:color .12s,background .12s;}
-.tat-table th.tat-th:hover{color:var(--b);background:var(--bl);}
-.tat-table th.tat-th.sorted{color:var(--b);background:var(--bl);}
+.tat-table th.tat-th:hover{color:#fff;background:var(--b2);}
+.tat-table th.tat-th.sorted{color:#fff;background:var(--b);}
 .tat-tc{margin-bottom:8px;}
 .kb{position:absolute;top:0;left:0;right:0;height:3.5px;background:var(--b);}
 .kl{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--t3);margin-bottom:7px;}
