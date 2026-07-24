@@ -1699,9 +1699,12 @@ function taskVisibleOnDay(task, day) {
 function isFlaggedForApoorv(task) {
   return !!task.flagApoorv && task.pse !== 'Apoorv';
 }
-// Pinned to exactly its Task Start Date and (once set) its Due Date — unlike
-// the normal carry-forward rule, it doesn't recur on every day in between.
+// Until Apoorv marks it seen, the notification recurs on every day (same
+// carry-forward rule as a normal task) so it can't be missed. Only once he
+// checks it off does it become "hard-surfaced as a fixed record" — pinned to
+// exactly its Task Start Date and (once set) its Due Date, nothing in between.
 function flaggedVisibleOnDay(task, day) {
+  if (!task.apoorvSeen) return taskVisibleOnDay(task, day);
   return day === taskStart(task) || (!!task.dueDate && day === task.dueDate);
 }
 
@@ -1992,7 +1995,7 @@ function renderTrackerView() {
       <div class="tc tk-flag-panel">
         <div class="th tk-flag-head">
           <span class="tht">🚩 Flagged for Apoorv</span>
-          <span class="ths">${flagged.length} task(s) raised by other PSEs · shown on their Task Start Date and Due Date</span>
+          <span class="ths">${flagged.length} task(s) raised by other PSEs · shown daily until marked seen, then pinned to Task Start Date & Due Date only</span>
         </div>
         <div class="tw">
           <table class="tk-table tk-flag-table">
