@@ -1801,6 +1801,9 @@ function trackerRow(t, day, { hideFlagCol = false } = {}) {
 // the owning PSE's table too — it's one shared record, not a duplicate.
 function flaggedRow(t) {
   const statusCls = 'tk-status-' + (t.status || 'Open').toLowerCase().replace(/\s+/g, '-');
+  // Same armed, 2-click confirmation pattern used elsewhere in the app (e.g.
+  // Quick Links) but scoped with its own state key so the two don't collide.
+  const armed = STATE.flagDeleteId === t.id;
   return `
     <tr data-id="${t.id}" class="tk-flag-row ${t.apoorvSeen ? 'tk-flag-seen' : ''}">
       <td class="tk-cell tk-cell-name">${escapeHtml(t.dealName || '(unnamed task)')}</td>
@@ -1816,6 +1819,9 @@ function flaggedRow(t) {
           <input type="checkbox" class="tk-input tk-seen-cb" data-field="apoorvSeen" ${t.apoorvSeen ? 'checked' : ''}/>
           <span>${t.apoorvSeen ? 'Seen ✓' : 'Mark seen'}</span>
         </label>
+      </td>
+      <td class="tk-cell">
+        <button class="tk-flag-del ${armed ? 'armed' : ''}" data-del-flag-id="${t.id}" title="${armed ? 'Click again to confirm delete' : 'Delete this task'}">${armed ? 'Confirm ✕' : '✕'}</button>
       </td>
     </tr>`;
 }
@@ -1999,7 +2005,7 @@ function renderTrackerView() {
         </div>
         <div class="tw">
           <table class="tk-table tk-flag-table">
-            <thead><tr><th style="width:32%">Task Name</th><th>Raised By</th><th>Task Start Date</th><th>Status</th><th>Seen</th></tr></thead>
+            <thead><tr><th style="width:32%">Task Name</th><th>Raised By</th><th>Task Start Date</th><th>Status</th><th>Seen</th><th></th></tr></thead>
             <tbody>${flagged.map(flaggedRow).join('')}</tbody>
           </table>
         </div>
@@ -2116,6 +2122,33 @@ function bindTrackerEvents() {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.delId;
       if (!confirm('Delete this task?')) return;
+      await fetch(`/api/tracker/${id}`, { method: 'DELETE' });
+      STATE.trackerTasks = STATE.trackerTasks.filter((t) => t.id !== id);
+      renderTrackerView();
+    });
+  });
+
+  // Flagged-for-Apoorv delete: armed, 2-click confirmation (first click arms
+  // the button and shows "Confirm ✕" for a few seconds; the SAME button must
+  // be clicked again to actually delete) instead of a native confirm() popup.
+  document.querySelectorAll('[data-del-flag-id]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const id = btn.dataset.delFlagId;
+      if (STATE.flagDeleteId !== id) {
+        clearTimeout(STATE.flagDeleteTimer);
+        STATE.flagDeleteId = id;
+        renderTrackerView();
+        STATE.flagDeleteTimer = setTimeout(() => {
+          if (STATE.flagDeleteId === id) {
+            STATE.flagDeleteId = null;
+            renderTrackerView();
+          }
+        }, 3500);
+        return;
+      }
+      clearTimeout(STATE.flagDeleteTimer);
+      STATE.flagDeleteId = null;
       await fetch(`/api/tracker/${id}`, { method: 'DELETE' });
       STATE.trackerTasks = STATE.trackerTasks.filter((t) => t.id !== id);
       renderTrackerView();
