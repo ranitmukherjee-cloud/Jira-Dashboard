@@ -1934,6 +1934,33 @@ function renderTrackerView() {
 
   renderTrackerSidebar();
 
+  // "Flagged For Apoorv" quick-filter: a dedicated results view showing ONLY
+  // this table (every currently-flagged task, board-wide, regardless of day)
+  // — nothing else on the page, per spec.
+  if (STATE.trackerFilters.flagApoorv === 'true') {
+    const flagged = allTasks
+      .filter(isFlaggedForApoorv)
+      .sort((a, b) => (a.apoorvSeen === b.apoorvSeen ? taskStart(a).localeCompare(taskStart(b)) : a.apoorvSeen ? 1 : -1));
+    document.getElementById('app').innerHTML = `
+      <div class="page tk-page">
+        <div class="ph"><div class="ph-text"><div class="pht">Daily Task Tracker</div><div class="phs">Filtered to Flagged For Apoorv · ${flagged.length} task(s) board-wide, across all days</div></div></div>
+        <div class="tc tk-flag-panel">
+          <div class="th tk-flag-head">
+            <span class="tht">🚩 Flagged for Apoorv</span>
+            <span class="ths">${flagged.length} task(s) raised by other PSEs · red = unseen, light green = seen</span>
+          </div>
+          <div class="tw">
+            <table class="tk-table tk-flag-table">
+              <thead><tr><th style="width:24%">Task Name</th><th style="width:14%">Raised By</th><th style="width:14%">Task Start Date</th><th style="width:26%">Remarks</th><th style="width:14%">Seen</th><th style="width:8%"></th></tr></thead>
+              <tbody>${flagged.map(flaggedRow).join('') || '<tr><td colspan="6" class="empty">No flagged tasks right now</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+    bindFlaggedOnlyView();
+    return;
+  }
+
   const pses = trackerVisiblePses();
   const tasksForPse = allTasks.filter((t) => pses.includes(t.pse));
 
@@ -2052,6 +2079,47 @@ function renderTrackerView() {
     </div>`;
 
   bindTrackerEvents();
+}
+
+// Minimal bindings for the "Flagged For Apoorv"-only results view — just the
+// editable fields (remarks, seen) and the armed delete, since none of the
+// day-nav/holiday/leave/add-task controls exist on this page.
+function bindFlaggedOnlyView() {
+  document.querySelectorAll('.tk-input[data-field], .tk-select[data-field]').forEach((el) => {
+    const row = el.closest('tr');
+    const id = row.dataset.id;
+    const field = el.dataset.field;
+    const isCheckbox = el.type === 'checkbox';
+    const immediate = el.tagName === 'SELECT' || el.type === 'date' || isCheckbox;
+    el.addEventListener(immediate ? 'change' : 'input', () => {
+      const value = isCheckbox ? el.checked : el.value;
+      saveTrackerField(id, field, value, immediate);
+    });
+  });
+
+  document.querySelectorAll('[data-del-flag-id]').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const id = btn.dataset.delFlagId;
+      if (STATE.flagDeleteId !== id) {
+        clearTimeout(STATE.flagDeleteTimer);
+        STATE.flagDeleteId = id;
+        renderTrackerView();
+        STATE.flagDeleteTimer = setTimeout(() => {
+          if (STATE.flagDeleteId === id) {
+            STATE.flagDeleteId = null;
+            renderTrackerView();
+          }
+        }, 3500);
+        return;
+      }
+      clearTimeout(STATE.flagDeleteTimer);
+      STATE.flagDeleteId = null;
+      await fetch(`/api/tracker/${id}`, { method: 'DELETE' });
+      STATE.trackerTasks = STATE.trackerTasks.filter((t) => t.id !== id);
+      renderTrackerView();
+    });
+  });
 }
 
 function bindTrackerEvents() {
