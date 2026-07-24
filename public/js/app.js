@@ -1810,9 +1810,9 @@ function flaggedRow(t) {
   const rowStateCls = t.apoorvSeen ? 'tk-flag-row-seen' : '';
   return `
     <tr data-id="${t.id}" class="tk-flag-row ${rowStateCls}">
-      <td class="tk-cell tk-cell-name">${escapeHtml(t.dealName || '(unnamed task)')}</td>
+      <td class="tk-cell tk-cell-name"><span class="tk-flag-taskname">${escapeHtml(t.dealName || '(unnamed task)')}</span></td>
       <td class="tk-cell"><span class="tk-flag-raiser">${t.pse}</span></td>
-      <td class="tk-cell">${new Date(taskStart(t) + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
+      <td class="tk-cell"><span class="tk-flag-startdate">${new Date(taskStart(t) + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span></td>
       <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="remarks" rows="1" placeholder="Remarks…">${escapeHtml(t.remarks || '')}</textarea></td>
       <td class="tk-cell tk-cell-seen">
         <label class="tk-seen-toggle ${t.apoorvSeen ? 'checked' : ''}" title="Mark as seen by Apoorv">
@@ -2006,7 +2006,7 @@ function renderTrackerView() {
         </div>
         <div class="tw">
           <table class="tk-table tk-flag-table">
-            <thead><tr><th style="width:26%">Task Name</th><th>Raised By</th><th>Task Start Date</th><th style="width:28%">Remarks</th><th>Seen</th><th></th></tr></thead>
+            <thead><tr><th style="width:24%">Task Name</th><th style="width:14%">Raised By</th><th style="width:14%">Task Start Date</th><th style="width:26%">Remarks</th><th style="width:14%">Seen</th><th style="width:8%"></th></tr></thead>
             <tbody>${flagged.map(flaggedRow).join('')}</tbody>
           </table>
         </div>
