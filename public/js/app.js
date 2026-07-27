@@ -801,6 +801,7 @@ function renderPipeline() {
       <td>${fmtUsd(i.arr)}</td>
       <td>${dealSizeBadge(i.dealSize)}</td>
       <td>${i.solutioningStartDate ? new Date(i.solutioningStartDate).toLocaleDateString('en-IN') : '—'}</td>
+      <td>${i.expectedSalesClosure ? new Date(i.expectedSalesClosure).toLocaleDateString('en-GB') : '<span style="color:var(--t3)">—</span>'}</td>
       <td>${i.isPreQuarterHoldover ? '<span class="flag-badge">🔴 Red Flag</span>' : '—'}</td>
       <td>${jiraLinkCell(i)}</td>
     </tr>`;
@@ -838,7 +839,7 @@ function renderPipeline() {
           <div class="th"><span class="tht">${p}</span><span class="ths">${list.length} deal(s) · ${fmtUsd(pseMrr)} MRR</span></div>
           <div class="tw">
             <table>
-              <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>KAM</th><th>Sales Rep</th><th>MRR</th><th>ARR</th><th>Size</th><th>Sol. Start</th><th>Flag</th><th></th></tr></thead>
+              <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>KAM</th><th>Sales Rep</th><th>MRR</th><th>ARR</th><th>Size</th><th>Sol. Start</th><th>Expected Closure Date</th><th>Flag</th><th></th></tr></thead>
               <tbody>${list.map(dealRow).join('')}</tbody>
             </table>
           </div>
