@@ -929,6 +929,7 @@ function renderMrr() {
       <td>${fbadge(i.status)}</td>
       <td>${fmtUsd(i.mrr)}</td>
       <td>${fmtUsd(i.arr)}</td>
+      <td>${i.expectedSalesClosure ? new Date(i.expectedSalesClosure).toLocaleDateString('en-GB') : '<span style="color:var(--t3)">—</span>'}</td>
       <td>${jiraLinkCell(i)}</td>
     </tr>`;
 
@@ -949,8 +950,8 @@ function renderMrr() {
       <div class="tc">
         <div class="tw">
           <table>
-            <thead><tr><th>Key</th><th>Client</th><th>PSE</th><th>Status</th><th>MRR</th><th>ARR</th><th></th></tr></thead>
-            <tbody>${largeDeals.map(dealSizeRow).join('') || '<tr><td colspan="7" class="empty">No large deals match the current filters</td></tr>'}</tbody>
+            <thead><tr><th>Key</th><th>Client</th><th>PSE</th><th>Status</th><th>MRR</th><th>ARR</th><th>Expected Closure Date</th><th></th></tr></thead>
+            <tbody>${largeDeals.map(dealSizeRow).join('') || '<tr><td colspan="8" class="empty">No large deals match the current filters</td></tr>'}</tbody>
           </table>
         </div>
       </div>
@@ -966,7 +967,7 @@ function renderMrr() {
             <div class="th"><span class="tht">${p}</span><span class="ths">${list.length} deal(s) missing MRR</span></div>
             <div class="tw">
               <table>
-                <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>MRR value</th><th>Updated</th></tr></thead>
+                <thead><tr><th>Key</th><th>Client</th><th>Status</th><th>MRR value</th><th>Expected Closure Date</th><th>Updated</th></tr></thead>
                 <tbody>
                   ${list
                     .map(
@@ -976,6 +977,7 @@ function renderMrr() {
                       <td>${i.summary || ''}</td>
                       <td>${fbadge(i.status)}</td>
                       <td>${i.mrr === null ? '<span class="bd bgy">blank</span>' : `<span class="bd ba">${i.mrr}</span>`}</td>
+                      <td>${i.expectedSalesClosure ? new Date(i.expectedSalesClosure).toLocaleDateString('en-GB') : '<span style="color:var(--t3)">—</span>'}</td>
                       <td>${new Date(i.updated).toLocaleDateString('en-IN')}</td>
                     </tr>`
                     )
