@@ -2860,6 +2860,7 @@ const UC_SECTIONS = [
     { key: 'scopeOfWork', label: 'Scope of Work', type: 'rich' },
     { key: 'solPriority', label: 'Sol. Priority', type: 'text' },
     { key: 'sowSendDate', label: 'SoW Send Date', type: 'date' },
+    { key: 'sowSignOffDate', label: 'SoW Sign-Off Date', type: 'date' },
   ] },
   { key: 'details', label: 'Details', cols: [
     { key: 'companySize', label: 'Company Size', type: 'text' },
