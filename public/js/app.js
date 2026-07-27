@@ -1016,7 +1016,7 @@ function renderMrr() {
 // ---------- Closing Soon tab ----------
 function renderClosingSoon() {
   const rows = applyFilters(STATE.data.issues)
-    .filter((i) => i.expectedSalesClosure)
+    .filter((i) => i.status !== 'Check in 3 Months' && i.expectedSalesClosure)
     .map((i) => ({ ...i, daysUntil: daysUntil(i.expectedSalesClosure) }))
     .filter((i) => i.daysUntil >= 0 && i.daysUntil <= 30)
     .sort((a, b) => a.daysUntil - b.daysUntil);
