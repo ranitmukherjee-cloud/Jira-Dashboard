@@ -1740,8 +1740,12 @@ function taskDelayDays(task, referenceDay = istToday()) {
   const endRef = task.status === 'Done' ? task.completedDate || referenceDay : referenceDay;
   return workingDaysAfter(due, endRef);
 }
-// Red iff the task is past its (current) due date and not finished on time.
+// Red row = still open and past due — an active signal that needs attention.
+// A Done task is never flagged red here, no matter how late it was actually
+// finished: "overdue" means unresolved, not "was once late". Late completions
+// still count in the report tables' Delayed column via taskDelayDays directly.
 function taskOverdue(task, referenceDay = istToday()) {
+  if (task.status === 'Done') return false;
   return taskDelayDays(task, referenceDay) > 0;
 }
 
