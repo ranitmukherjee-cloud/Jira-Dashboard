@@ -1690,7 +1690,11 @@ function taskVisibleOnDay(task, day) {
   const start = taskStart(task);
   if (start > day) return false;
   if (task.status === 'Done') {
-    return day === start || day === task.completedDate || day === task.dueDate;
+    // Exactly 2 fixed pages once Done: the Task Start Date, and the Due Date
+    // (which doubles as the "marked done" record regardless of which day it
+    // was actually marked done on) -- the actual completion day is used for
+    // lateness math elsewhere, but does NOT get its own page.
+    return day === start || day === task.dueDate;
   }
   return true;
 }
