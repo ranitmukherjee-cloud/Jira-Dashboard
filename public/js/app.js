@@ -1346,7 +1346,7 @@ function renderTatSidebar() {
   });
 }
 
-// ---------- Team Performance tab ----------
+// ---------- Team Pulse tab (formerly "Team Performance") ----------
 function renderTeam() {
   const rows = applyFilters(STATE.data.issues);
   const byPse = {};
@@ -1370,7 +1370,7 @@ function renderTeam() {
 
   document.getElementById('app').innerHTML = `
     <div class="page">
-      <div class="ph"><div class="pht">Team Performance</div><div class="phs">Per-PSE live portfolio breakdown · closed/won deals aren't tracked here — this reflects work still in motion</div></div>
+      <div class="ph"><div class="pht">Team Pulse</div><div class="phs">Per-PSE live portfolio breakdown · closed/won deals aren't tracked here — this reflects work still in motion</div></div>
       <div class="krow">
         ${pseNames
           .map((p) => {
