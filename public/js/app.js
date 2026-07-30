@@ -1776,7 +1776,9 @@ async function renderTracker() {
 function trackerRow(t, day, { hideFlagCol = false } = {}) {
   const overdue = taskOverdue(t, day);
   const rowCls = overdue ? 'row-flagged' : '';
-  const statusCls = 'tk-status-' + (t.status || 'Open').toLowerCase().replace(/\s+/g, '-');
+  // "Open" -> "Planned" (kept in sync with any not-yet-migrated legacy data).
+  const statusVal = t.status === 'Open' ? 'Planned' : t.status || 'Planned';
+  const statusCls = 'tk-status-' + statusVal.toLowerCase().replace(/\s+/g, '-');
   // Armed, 2-click delete confirmation — same pattern as the Flagged-for-Apoorv
   // panel, so nobody can delete a task with a single accidental click.
   const armed = STATE.taskDeleteId === t.id;
@@ -1787,7 +1789,7 @@ function trackerRow(t, day, { hideFlagCol = false } = {}) {
       <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" lang="en-GB" data-field="taskStartDate" value="${taskStart(t) || ''}" title="Task Start Date — the task appears from this day onward; change it to move the task to another day"/></td>
       <td class="tk-cell">
         <select class="tk-select tk-select-status ${statusCls}" data-field="status">
-          ${['Open', 'In Progress', 'Done'].map((s) => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${s}</option>`).join('')}
+          ${['Planned', 'In Progress', 'Done'].map((s) => `<option value="${s}" ${statusVal === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
       </td>
       <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" lang="en-GB" data-field="dueDate" value="${t.dueDate || ''}" title="Due date (editable)"/></td>
@@ -1847,7 +1849,8 @@ function trackerVisiblePses() {
 // Row-level filters (status / help-in-SOW / flag) applied within a PSE sheet.
 function trackerRowMatchesFilters(t) {
   const f = STATE.trackerFilters;
-  if (f.status.size && !f.status.has(t.status)) return false;
+  const status = t.status === 'Open' ? 'Planned' : t.status; // legacy-data fallback
+  if (f.status.size && !f.status.has(status)) return false;
   if (f.helpInSow && String(!!t.helpInSow) !== f.helpInSow) return false;
   if (f.flagApoorv && String(!!t.flagApoorv) !== f.flagApoorv) return false;
   return true;
@@ -2007,14 +2010,17 @@ function renderTrackerView() {
   const visibleToday = tasksForPse.filter(
     (t) => taskVisibleOnDay(t, day) && trackerRowMatchesFilters(t) && !leave[`${t.pse}|${day}`]
   );
-  const sc = { Open: 0, 'In Progress': 0, Done: 0 };
-  visibleToday.forEach((t) => { sc[t.status] = (sc[t.status] || 0) + 1; });
+  const sc = { Planned: 0, 'In Progress': 0, Done: 0 };
+  visibleToday.forEach((t) => {
+    const s = t.status === 'Open' ? 'Planned' : t.status; // legacy-data fallback
+    sc[s] = (sc[s] || 0) + 1;
+  });
   const delayedToday = visibleToday.filter((t) => taskDelayDays(t, day) > 0).length;
   const overdueTotal = tasksForPse.filter((t) => taskOverdue(t, day)).length;
 
   const summaryPanel = `
     <div class="tk-summary">
-      <div class="tk-sum-cell tk-sum-open"><span class="tk-sum-n">${sc.Open}</span><span class="tk-sum-l">Open</span></div>
+      <div class="tk-sum-cell tk-sum-open"><span class="tk-sum-n">${sc.Planned}</span><span class="tk-sum-l">Planned</span></div>
       <div class="tk-sum-cell tk-sum-prog"><span class="tk-sum-n">${sc['In Progress']}</span><span class="tk-sum-l">In Progress</span></div>
       <div class="tk-sum-cell tk-sum-done"><span class="tk-sum-n">${sc.Done}</span><span class="tk-sum-l">Done</span></div>
       <div class="tk-sum-cell tk-sum-delayed"><span class="tk-sum-n">${delayedToday}</span><span class="tk-sum-l">Delayed</span></div>
@@ -2290,7 +2296,7 @@ function renderTrackerSidebar() {
         </label>
       </div>
       ${faccGroup('pse', 'PSE', checkboxListHtml('pse', TRACKER_PSE_ROWS, f.pse), f.pse.size)}
-      ${faccGroup('status', 'Status', checkboxListHtml('status', ['Open', 'In Progress', 'Done'], f.status), f.status.size)}
+      ${faccGroup('status', 'Status', checkboxListHtml('status', ['Planned', 'In Progress', 'Done'], f.status), f.status.size)}
 
       <div class="sfgroup-row">
         <div class="sfgroup-half">

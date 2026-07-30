@@ -312,7 +312,7 @@ td.tk-cell{padding:2px 4px;}
 .tk-select{padding-right:24px;appearance:auto;min-width:112px;}
 .tk-select-status{min-width:130px;font-weight:700;border-radius:6px;}
 /* Three light-tone status colors */
-.tk-select-status.tk-status-open{background:#EEF2FF;color:#3B4CCA;}
+.tk-select-status.tk-status-planned{background:#EEF2FF;color:#3B4CCA;}
 .tk-select-status.tk-status-in-progress{background:#FFF4E5;color:#B45309;}
 .tk-select-status.tk-status-done{background:#E9F9EF;color:#047857;}
 /* Flag Apoorv / Help in SOW: green for Yes, red for No */
