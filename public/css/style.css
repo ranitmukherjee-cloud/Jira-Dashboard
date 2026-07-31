@@ -586,3 +586,7 @@ tr.row-early:hover td{background:#D6F5E3 !important;}
 .win-num{font-weight:800;color:var(--n);text-align:right;}
 .win-table th:nth-child(4),.win-table th:nth-child(5){text-align:right;}
 .win-foot td{background:#F1F5FB;font-weight:900;color:var(--n);border-top:2px solid var(--bdr2);font-size:12px;}
+/* Unassigned won deals — amber-flagged so they read as "needs a PSE", not a person */
+.win-pse-unassigned{border:1.5px solid #FCD9A8;}
+.win-pse-unassigned .th{background:linear-gradient(135deg,#B45309 0%,#92400E 100%) !important;}
+.win-pse-unassigned .win-total-pill{color:#FDE68A;background:rgba(253,230,138,.16);}

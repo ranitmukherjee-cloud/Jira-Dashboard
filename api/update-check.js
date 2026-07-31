@@ -9,9 +9,13 @@ const { UPDATE_CHECK_STATUSES, WON_STATUSES } = require('../lib/jira');
 // Read-only — edits happen natively in Jira.
 module.exports = async (req, res) => {
   try {
-    const { allCards, generatedAt } = await getLiveData();
-    const statuses = req.query.set === 'won' ? WON_STATUSES : UPDATE_CHECK_STATUSES;
-    const cards = (allCards || []).filter((c) => statuses.includes(c.status));
+    const { allCards, unassignedCards, generatedAt } = await getLiveData();
+    const won = req.query.set === 'won';
+    const statuses = won ? WON_STATUSES : UPDATE_CHECK_STATUSES;
+    // The wins tab also surfaces unassigned cards (grouped as "Unassigned");
+    // every other consumer keeps the no-unassigned policy.
+    const pool = won ? [...(allCards || []), ...(unassignedCards || [])] : allCards || [];
+    const cards = pool.filter((c) => statuses.includes(c.status));
     res.status(200).json({ generatedAt, count: cards.length, cards });
   } catch (err) {
     console.error('Update Check fetch failed:', err);

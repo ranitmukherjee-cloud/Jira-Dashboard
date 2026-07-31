@@ -71,7 +71,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/data', async (req, res) => {
   try {
-    const { allCards, ...data } = await getLiveData(); // strip allCards (Update Check tab only)
+    const { allCards, unassignedCards, ...data } = await getLiveData(); // strip tab-specific sets
     res.json(data);
   } catch (err) {
     console.error('Live data fetch failed:', err.message);
@@ -82,9 +82,11 @@ app.get('/api/data', async (req, res) => {
 // Jira Update Check — full assigned set filtered to the sanity-check statuses.
 app.get('/api/update-check', async (req, res) => {
   try {
-    const { allCards, generatedAt } = await getLiveData();
-    const statuses = req.query.set === 'won' ? WON_STATUSES : UPDATE_CHECK_STATUSES;
-    const cards = (allCards || []).filter((c) => statuses.includes(c.status));
+    const { allCards, unassignedCards, generatedAt } = await getLiveData();
+    const won = req.query.set === 'won';
+    const statuses = won ? WON_STATUSES : UPDATE_CHECK_STATUSES;
+    const pool = won ? [...(allCards || []), ...(unassignedCards || [])] : allCards || [];
+    const cards = pool.filter((c) => statuses.includes(c.status));
     res.json({ generatedAt, count: cards.length, cards });
   } catch (err) {
     console.error('Update Check fetch failed:', err.message);

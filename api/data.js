@@ -3,7 +3,7 @@ const { getLiveData } = require('../lib/live');
 // Live board data, pulled straight from Jira (short in-memory cache only).
 module.exports = async (req, res) => {
   try {
-    const { allCards, ...data } = await getLiveData(); // strip allCards (Update Check tab only)
+    const { allCards, unassignedCards, ...data } = await getLiveData(); // strip tab-specific sets
     res.status(200).json(data);
   } catch (err) {
     console.error('Live data fetch failed:', err);

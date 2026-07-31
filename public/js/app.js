@@ -1368,6 +1368,10 @@ const WON_STATUS_LABEL = {
   'Final Golive': 'Final GoLive',
 };
 const wonLabel = (s) => WON_STATUS_LABEL[s] || s;
+// This tab (only) surfaces cards with no PSE, grouped as "Unassigned", so a
+// won deal is never invisible just because nobody's assigned to it yet.
+const UNASSIGNED = 'Unassigned';
+const winPse = (c) => c.assignee || UNASSIGNED;
 
 // Financial-year quarters: Q1 May–Jul, Q2 Aug–Oct, Q3 Nov–Jan, Q4 Feb–Apr.
 // FY 26-27 therefore runs 1 May 2026 → 30 Apr 2027.
@@ -1392,7 +1396,7 @@ const closeDateOf = (c) => c.commercialSignOffDate || null;
 function applyWinFilters(cards) {
   const f = STATE.winFilters;
   return cards.filter((c) => {
-    if (f.pse.size && !f.pse.has(c.assignee)) return false;
+    if (f.pse.size && !f.pse.has(winPse(c))) return false;
     if (f.status.size && !f.status.has(c.status)) return false;
     return true;
   });
@@ -1428,11 +1432,12 @@ function winRow(c) {
 // One PSE block: their deals plus a totals footer (count, MRR, ARR).
 function winPseBlock(pse, list) {
   const totalMrr = list.reduce((s, c) => s + (c.mrr || 0), 0);
+  const isUnassigned = pse === UNASSIGNED;
   return `
-    <div class="tc win-pse">
+    <div class="tc win-pse ${isUnassigned ? 'win-pse-unassigned' : ''}">
       <div class="th">
-        <span class="tht">${pse}</span>
-        <span class="ths">${list.length} deal(s)</span>
+        <span class="tht">${isUnassigned ? '⚠️ ' + pse : pse}</span>
+        <span class="ths">${list.length} deal(s)${isUnassigned ? ' · no PSE set in Jira' : ''}</span>
         <span class="win-total-pill">Total MRR ${fmtUsd(totalMrr)} · ARR ${fmtUsd(totalMrr * 12)}</span>
       </div>
       <div class="tw">
@@ -1458,7 +1463,7 @@ function winFySection(fy, cards, noDateCards) {
       if (!qCards.length) return '';
       const qMrr = qCards.reduce((s, c) => s + (c.mrr || 0), 0);
       const byPse = {};
-      qCards.forEach((c) => { (byPse[c.assignee] = byPse[c.assignee] || []).push(c); });
+      qCards.forEach((c) => { (byPse[winPse(c)] = byPse[winPse(c)] || []).push(c); });
       const pses = Object.keys(byPse).sort();
       return `
         <div class="win-q">
@@ -1477,7 +1482,7 @@ function winFySection(fy, cards, noDateCards) {
   const noDateBlock = noDateCards && noDateCards.length
     ? (() => {
         const byPse = {};
-        noDateCards.forEach((c) => { (byPse[c.assignee] = byPse[c.assignee] || []).push(c); });
+        noDateCards.forEach((c) => { (byPse[winPse(c)] = byPse[winPse(c)] || []).push(c); });
         const nMrr = noDateCards.reduce((s, c) => s + (c.mrr || 0), 0);
         return `
         <div class="win-q win-q-nodate">
@@ -1520,9 +1525,10 @@ function renderTeamView() {
   const statMrr = statCards.reduce((s, c) => s + (c.mrr || 0), 0);
   const statByPse = {};
   statCards.forEach((c) => {
-    statByPse[c.assignee] = statByPse[c.assignee] || { n: 0, mrr: 0 };
-    statByPse[c.assignee].n++;
-    statByPse[c.assignee].mrr += c.mrr || 0;
+    const p = winPse(c);
+    statByPse[p] = statByPse[p] || { n: 0, mrr: 0 };
+    statByPse[p].n++;
+    statByPse[p].mrr += c.mrr || 0;
   });
   const statPses = Object.keys(statByPse).sort((a, b) => statByPse[b].mrr - statByPse[a].mrr);
 
@@ -1608,7 +1614,7 @@ function openWinDetail(key) {
     <div class="modal-body">
       <div class="mfields">
         ${field('Status', wonLabel(c.status))}
-        ${field('PSE', c.assignee)}
+        ${field('PSE', winPse(c))}
         ${field('KAM', c.kam)}
         ${field('Sales Representative', c.salesRep)}
         ${field('MRR (USD)', c.mrr ? fmtUsd(c.mrr) : '—')}
@@ -1629,7 +1635,7 @@ function renderTeamSidebar() {
   if (!STATE.facc) loadSidebarPrefs();
   const f = STATE.winFilters;
   const cards = STATE.winCards || [];
-  const pses = distinct(cards.map((c) => c.assignee));
+  const pses = distinct(cards.map(winPse));
   const statuses = distinct(cards.map((c) => c.status));
   const activeCount = f.pse.size + f.status.size;
   const sb = document.getElementById('sidebar');
