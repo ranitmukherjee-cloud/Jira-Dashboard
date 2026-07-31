@@ -529,3 +529,60 @@ tr.row-early:hover td{background:#D6F5E3 !important;}
 .uc-stats-sub .uc-meta-red{color:#FFD1DA;}
 .uc-stats-wrap .uc-stats{padding:16px 18px 18px;margin-bottom:0;}
 .uc-stats-wrap .uc-stat-cap:first-child{margin-top:0;}
+
+/* ===== WINS & MILESTONES TAB (won/closed deals) ===== */
+/* Scoreboard — celebratory dark panel so wins feel like an achievement board */
+.win-stats{background:linear-gradient(140deg,#0B1220 0%,#16203A 55%,#1B1440 100%);border-radius:16px;padding:18px 20px 20px;margin-bottom:26px;box-shadow:0 10px 30px rgba(11,18,32,.22);}
+.win-stats-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px;}
+.win-stats-title{font-size:15px;font-weight:900;color:#fff;letter-spacing:.2px;}
+.win-toggles{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.win-tg-label{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:#8B97B4;margin-right:2px;}
+.win-tg-sep{width:1px;height:18px;background:rgba(255,255,255,.14);margin:0 6px;}
+.win-chip{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);color:#DCE3F2;border-radius:20px;padding:5px 13px;font-size:11.5px;font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.win-chip:hover{background:rgba(255,255,255,.16);color:#fff;}
+.win-chip.active{background:linear-gradient(135deg,#3B5BFF,#7C3AED);border-color:transparent;color:#fff;box-shadow:0 3px 10px rgba(59,91,255,.4);}
+.win-chip-n{opacity:.65;font-weight:800;margin-left:2px;}
+
+.win-krow{margin-bottom:16px;}
+.win-stats .kpi{background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.1);box-shadow:none;}
+.win-stats .kl{color:#8B97B4;}
+.win-stats .kv{color:#fff;}
+.win-stats .ks{color:#6F7C99;}
+.win-kpi-hero{background:linear-gradient(135deg,rgba(18,183,106,.18),rgba(18,183,106,.05)) !important;border-color:rgba(18,183,106,.35) !important;}
+.win-kpi-hero .kv{color:#6EE7B7 !important;font-size:30px;}
+
+/* Per-PSE scoreboard cards */
+.win-pse-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px;}
+.win-pse-card{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.11);border-radius:12px;padding:13px 15px;transition:transform .14s,background .14s;}
+.win-pse-card:hover{transform:translateY(-2px);background:rgba(255,255,255,.11);}
+.win-pse-name{font-size:12.5px;font-weight:800;color:#fff;margin-bottom:8px;}
+.win-pse-n{font-size:26px;font-weight:900;color:#6EE7B7;line-height:1;display:flex;align-items:baseline;gap:5px;}
+.win-pse-n-l{font-size:10px;font-weight:700;color:#6F7C99;text-transform:uppercase;letter-spacing:.5px;}
+.win-pse-mrr{font-size:12px;font-weight:800;color:#9DB2FF;margin-top:7px;}
+.win-pse-arr{font-size:10.5px;font-weight:700;color:#6F7C99;margin-top:1px;}
+
+/* FY sections + quarter grouping */
+.win-fy-head{margin-top:30px;}
+.win-fy-head .sht{font-size:16px;}
+.win-qchips{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0 16px;}
+.win-qchips .win-chip{background:var(--w);border:1.5px solid var(--bdr2);color:var(--t2);}
+.win-qchips .win-chip:hover{border-color:var(--b);color:var(--b);background:var(--bl);}
+.win-qchips .win-chip.active{background:linear-gradient(135deg,#3B5BFF,#7C3AED);border-color:transparent;color:#fff;}
+.win-q{margin-bottom:22px;border-left:3px solid var(--b);padding-left:14px;}
+.win-q-nodate{border-left-color:var(--a);}
+.win-q-head{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin-bottom:11px;}
+.win-q-name{font-size:15px;font-weight:900;color:var(--n);background:var(--bl);border-radius:8px;padding:3px 12px;}
+.win-q-nodate .win-q-name{background:var(--ab);color:var(--a);}
+.win-q-range{font-size:11.5px;font-weight:700;color:var(--t3);}
+.win-q-stats{margin-left:auto;font-size:12px;font-weight:800;color:#047857;background:var(--gb);border-radius:20px;padding:4px 13px;}
+.win-q-nodate .win-q-stats{color:var(--a);background:var(--ab);}
+
+/* Per-PSE win tables */
+.win-pse{margin-bottom:11px;}
+.win-total-pill{margin-left:auto;font-size:11px;font-weight:800;color:#6EE7B7;background:rgba(18,183,106,.15);border-radius:20px;padding:3px 12px;}
+.win-table thead th{background:#F7F9FC;}
+.win-table td{font-size:12px;}
+.win-client{font-weight:700;color:var(--n);}
+.win-num{font-weight:800;color:var(--n);text-align:right;}
+.win-table th:nth-child(4),.win-table th:nth-child(5){text-align:right;}
+.win-foot td{background:#F1F5FB;font-weight:900;color:var(--n);border-top:2px solid var(--bdr2);font-size:12px;}

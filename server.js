@@ -5,7 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { getLiveData } = require('./lib/live');
-const { UPDATE_CHECK_STATUSES } = require('./lib/jira');
+const { UPDATE_CHECK_STATUSES, WON_STATUSES } = require('./lib/jira');
 const { listTasks, createTask, updateTask, deleteTask, listLeave, setLeaveStatus, listHolidays, setHolidayStatus } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
 const { listLinks, addLink, updateLink, reorderLinks, deleteLink, listGroups, createGroup, renameGroup, deleteGroup } = require('./lib/quickLinks');
@@ -83,7 +83,8 @@ app.get('/api/data', async (req, res) => {
 app.get('/api/update-check', async (req, res) => {
   try {
     const { allCards, generatedAt } = await getLiveData();
-    const cards = (allCards || []).filter((c) => UPDATE_CHECK_STATUSES.includes(c.status));
+    const statuses = req.query.set === 'won' ? WON_STATUSES : UPDATE_CHECK_STATUSES;
+    const cards = (allCards || []).filter((c) => statuses.includes(c.status));
     res.json({ generatedAt, count: cards.length, cards });
   } catch (err) {
     console.error('Update Check fetch failed:', err.message);

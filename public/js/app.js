@@ -37,6 +37,10 @@ const STATE = {
   tatFilters: { pse: new Set(), status: new Set(), health: new Set(), kam: new Set(), salesRep: new Set(), dealSize: '' },
   tatBox: 'all',
   tatSort: {}, // per-table sort state: { fy2627:{key,dir}, fy2526:{...}, poc:{...} }
+  winCards: [],
+  winFilters: { pse: new Set(), status: new Set() },
+  winStatFilter: { fy: 'All', q: 'All' }, // scoreboard toggles
+  winTableQuarter: {}, // per-FY-table quarter chip, e.g. { 'FY 26-27': 'Q1' }
   updateCards: [],
   updateFilters: { pse: new Set(), status: new Set(), kam: new Set(), salesRep: new Set(), requestCategory: new Set(), completeness: 'all', sections: new Set(), missingField: '' },
   updateCollapsed: new Set(), // PSE panels collapsed on the Jira Update Check tab
@@ -326,14 +330,17 @@ function loadSidebarPrefs() {
   });
 }
 
-function checkboxListHtml(id, options, selected) {
+// `labelFn` is optional — lets a tab display a friendlier label than the raw
+// stored value (e.g. Jira board labels on the wins tab) without changing what
+// gets filtered on. Defaults to showing the value itself.
+function checkboxListHtml(id, options, selected, labelFn) {
   if (!options.length) return '<div class="empty" style="padding:8px;font-size:11px;">No data</div>';
   return `<div class="sf-opts">${options
     .map(
       (o) => `
       <label class="sf-opt">
         <input type="checkbox" data-mgroup="${id}" value="${escapeAttr(o)}" ${selected.has(o) ? 'checked' : ''}/>
-        <span>${o}</span>
+        <span>${labelFn ? labelFn(o) : o}</span>
       </label>`
     )
     .join('')}</div>`;
@@ -1351,71 +1358,321 @@ function renderTatSidebar() {
   });
 }
 
-// ---------- Team Pulse tab (formerly "Team Performance") ----------
-function renderTeam() {
-  const rows = applyFilters(STATE.data.issues);
-  const byPse = {};
-  rows.forEach((i) => {
-    if (!byPse[i.assignee]) byPse[i.assignee] = { total: 0, active: 0, won: 0, churn: 0, cold: 0, rejected: 0 };
-    byPse[i.assignee].total++;
-    byPse[i.assignee][i.stageGroup]++;
-  });
-  const pseNames = Object.keys(byPse).sort((a, b) => byPse[b].total - byPse[a].total);
+// ---------- Wins & Milestones tab (won/closed deals) ----------
+// Board columns are labelled differently from their underlying Jira statuses
+// (verified against the PSV board config) — map them back for display.
+const WON_STATUS_LABEL = {
+  'Closure/Contract Won': 'Contract Won',
+  'In Progress': 'Ongoing Implementation',
+  Completed: 'GoLive',
+  'Final Golive': 'Final GoLive',
+};
+const wonLabel = (s) => WON_STATUS_LABEL[s] || s;
 
-  const statuses = distinct(rows.map((i) => i.status));
-  const statusByPse = {};
-  statuses.forEach((s) => {
-    statusByPse[s] = {};
-    pseNames.forEach((p) => (statusByPse[s][p] = 0));
-  });
-  rows.forEach((i) => {
-    if (!statusByPse[i.status]) statusByPse[i.status] = {};
-    statusByPse[i.status][i.assignee] = (statusByPse[i.status][i.assignee] || 0) + 1;
-  });
+// Financial-year quarters: Q1 May–Jul, Q2 Aug–Oct, Q3 Nov–Jan, Q4 Feb–Apr.
+// FY 26-27 therefore runs 1 May 2026 → 30 Apr 2027.
+function fyOf(dateStr) {
+  const [y, m] = dateStr.split('-').map(Number);
+  const startYear = m >= 5 ? y : y - 1;
+  return `FY ${String(startYear).slice(2)}-${String(startYear + 1).slice(2)}`;
+}
+function quarterOf(dateStr) {
+  const m = Number(dateStr.split('-')[1]);
+  if (m >= 5 && m <= 7) return 'Q1';
+  if (m >= 8 && m <= 10) return 'Q2';
+  if (m === 11 || m === 12 || m === 1) return 'Q3';
+  return 'Q4';
+}
+const QUARTER_RANGE = { Q1: '1 May – 31 Jul', Q2: '1 Aug – 31 Oct', Q3: '1 Nov – 31 Jan', Q4: '1 Feb – 30 Apr' };
+const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];
+// Deal close date = Commercial Sign-Off Date (primary). Deals without one are
+// still shown, grouped separately, so nothing won is ever hidden.
+const closeDateOf = (c) => c.commercialSignOffDate || null;
 
-  document.getElementById('app').innerHTML = `
-    <div class="page">
-      <div class="ph"><div class="pht">Team Pulse</div><div class="phs">Per-PSE live portfolio breakdown · closed/won deals aren't tracked here — this reflects work still in motion</div></div>
-      <div class="krow">
-        ${pseNames
-          .map((p) => {
-            const d = byPse[p];
-            return `<div class="kpi"><div class="kb"></div><div class="kl">${p}</div><div class="kv" style="font-size:22px">${d.total}</div><div class="ks">${d.active} active · ${d.cold} cold</div></div>`;
-          })
-          .join('')}
+function applyWinFilters(cards) {
+  const f = STATE.winFilters;
+  return cards.filter((c) => {
+    if (f.pse.size && !f.pse.has(c.assignee)) return false;
+    if (f.status.size && !f.status.has(c.status)) return false;
+    return true;
+  });
+}
+
+async function renderTeam() {
+  document.getElementById('app').innerHTML = '<div class="page"><div class="loading">Loading won deals…</div></div>';
+  try {
+    const res = await fetch('/api/update-check?set=won', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    STATE.winCards = (await res.json()).cards || [];
+  } catch (err) {
+    document.getElementById('app').innerHTML = `<div class="page"><div class="empty">Could not load won deals: ${err.message}</div></div>`;
+    return;
+  }
+  renderTeamView();
+}
+
+function winRow(c) {
+  const arr = c.mrr ? c.mrr * 12 : null;
+  return `
+    <tr data-key="${c.key}">
+      <td class="win-client">${c.summary || '<span class="tat-blank">—</span>'}</td>
+      <td><a class="jira-key-link" href="${c.url}" target="_blank" rel="noopener" title="Open ${c.key} in Jira">${c.key} ↗</a></td>
+      <td>${wonLabel(c.status)}</td>
+      <td class="win-num">${c.mrr ? fmtUsd(c.mrr) : '<span class="tat-blank">—</span>'}</td>
+      <td class="win-num">${arr ? fmtUsd(arr) : '<span class="tat-blank">—</span>'}</td>
+      <td>${c.commercialSignOffDate ? new Date(c.commercialSignOffDate + 'T00:00:00').toLocaleDateString('en-GB') : '<span class="tat-blank">— not set —</span>'}</td>
+      <td>${c.sowSignOffDate ? new Date(c.sowSignOffDate + 'T00:00:00').toLocaleDateString('en-GB') : '<span class="tat-blank">—</span>'}</td>
+    </tr>`;
+}
+
+// One PSE block: their deals plus a totals footer (count, MRR, ARR).
+function winPseBlock(pse, list) {
+  const totalMrr = list.reduce((s, c) => s + (c.mrr || 0), 0);
+  return `
+    <div class="tc win-pse">
+      <div class="th">
+        <span class="tht">${pse}</span>
+        <span class="ths">${list.length} deal(s)</span>
+        <span class="win-total-pill">Total MRR ${fmtUsd(totalMrr)} · ARR ${fmtUsd(totalMrr * 12)}</span>
       </div>
-
-      <div class="card" style="margin-bottom:16px"><div class="ct">Portfolio by Stage</div><div class="cs">Active / Cold per PSE</div><div style="height:280px"><canvas id="pseStackChart"></canvas></div></div>
-
-      <div class="tc">
-        <div class="th"><span class="tht">Status × PSE Matrix</span><span class="ths">Exact live counts</span></div>
-        <div class="tw">
-          <table>
-            <thead><tr><th>Status</th>${pseNames.map((p) => `<th>${p}</th>`).join('')}<th>Total</th></tr></thead>
-            <tbody>
-              ${statuses
-                .map((s) => {
-                  const total = pseNames.reduce((sum, p) => sum + (statusByPse[s][p] || 0), 0);
-                  return `<tr><td style="font-weight:700">${s}</td>${pseNames.map((p) => `<td>${statusByPse[s][p] || 0}</td>`).join('')}<td style="font-weight:700">${total}</td></tr>`;
-                })
-                .join('')}
-              <tr style="background:#F7F9FC"><td style="font-weight:800">TOTAL</td>${pseNames.map((p) => `<td style="font-weight:800">${byPse[p].total}</td>`).join('')}<td style="font-weight:800">${rows.length}</td></tr>
-            </tbody>
-          </table>
-        </div>
+      <div class="tw">
+        <table class="win-table">
+          <thead><tr><th style="width:26%">Client Name</th><th>Project Card</th><th>Status</th><th>MRR</th><th>ARR</th><th>Commercial Sign-Off</th><th>SoW Sign-Off</th></tr></thead>
+          <tbody>${list.map(winRow).join('')}</tbody>
+          <tfoot><tr class="win-foot"><td colspan="3">Total — ${pse}</td><td class="win-num">${fmtUsd(totalMrr)}</td><td class="win-num">${fmtUsd(totalMrr * 12)}</td><td colspan="2"></td></tr></tfoot>
+        </table>
       </div>
     </div>`;
+}
 
-  destroyCharts();
-  addChart(
-    'pseStackChart', 'bar', pseNames,
-    [
-      { label: 'Active', data: pseNames.map((p) => byPse[p].active), backgroundColor: '#0054FC' },
-      { label: 'Cold', data: pseNames.map((p) => byPse[p].cold), backgroundColor: '#D97706' },
-    ],
-    { plugins: { legend: { display: true, position: 'bottom' } }, scales: { x: { stacked: true }, y: { stacked: true } } },
-    (pse) => goToFilteredList(`PSE: ${pse}`, (i) => i.assignee === pse)
+// A full FY section: quarter chips + per-quarter, per-PSE tables.
+function winFySection(fy, cards, noDateCards) {
+  const sel = STATE.winTableQuarter[fy] || 'All';
+  const inQ = (q) => cards.filter((c) => quarterOf(closeDateOf(c)) === q);
+  const shownQuarters = sel === 'All' ? QUARTERS : [sel];
+  const totalMrr = cards.reduce((s, c) => s + (c.mrr || 0), 0);
+
+  const quarterBlocks = shownQuarters
+    .map((q) => {
+      const qCards = inQ(q);
+      if (!qCards.length) return '';
+      const qMrr = qCards.reduce((s, c) => s + (c.mrr || 0), 0);
+      const byPse = {};
+      qCards.forEach((c) => { (byPse[c.assignee] = byPse[c.assignee] || []).push(c); });
+      const pses = Object.keys(byPse).sort();
+      return `
+        <div class="win-q">
+          <div class="win-q-head">
+            <span class="win-q-name">${q}</span>
+            <span class="win-q-range">${QUARTER_RANGE[q]}</span>
+            <span class="win-q-stats">${qCards.length} deal(s) · ${fmtUsd(qMrr)} MRR · ${fmtUsd(qMrr * 12)} ARR</span>
+          </div>
+          ${pses.map((p) => winPseBlock(p, byPse[p].slice().sort((a, b) => (b.mrr || 0) - (a.mrr || 0)))).join('')}
+        </div>`;
+    })
+    .join('');
+
+  // Deals won by status but with no Commercial Sign-Off Date yet — surfaced
+  // under the current FY so they're never silently dropped.
+  const noDateBlock = noDateCards && noDateCards.length
+    ? (() => {
+        const byPse = {};
+        noDateCards.forEach((c) => { (byPse[c.assignee] = byPse[c.assignee] || []).push(c); });
+        const nMrr = noDateCards.reduce((s, c) => s + (c.mrr || 0), 0);
+        return `
+        <div class="win-q win-q-nodate">
+          <div class="win-q-head">
+            <span class="win-q-name">—</span>
+            <span class="win-q-range">Commercial Sign-Off Date not set</span>
+            <span class="win-q-stats">${noDateCards.length} deal(s) · ${fmtUsd(nMrr)} MRR · ${fmtUsd(nMrr * 12)} ARR</span>
+          </div>
+          ${Object.keys(byPse).sort().map((p) => winPseBlock(p, byPse[p])).join('')}
+        </div>`;
+      })()
+    : '';
+
+  return `
+    <div class="sh win-fy-head"><div class="sht">${fy} — Won &amp; Closed Deals</div><div class="shl"></div><div class="shb">${cards.length} deal(s) · ${fmtUsd(totalMrr)} MRR</div></div>
+    <div class="win-qchips">
+      ${['All', ...QUARTERS].map((q) => `<button class="win-chip ${sel === q ? 'active' : ''}" data-win-q="${fy}|${q}">${q}${q !== 'All' ? ` <span class="win-chip-n">${inQ(q).length}</span>` : ` <span class="win-chip-n">${cards.length}</span>`}</button>`).join('')}
+    </div>
+    ${quarterBlocks || (sel === 'All' ? '' : '<div class="empty">No deals closed in this quarter</div>')}
+    ${sel === 'All' ? noDateBlock : ''}
+    ${!quarterBlocks && !(sel === 'All' && noDateBlock) ? '<div class="empty">No won deals in this financial year yet</div>' : ''}`;
+}
+
+function renderTeamView() {
+  renderTeamSidebar();
+  const all = applyWinFilters(STATE.winCards || []);
+  const dated = all.filter((c) => closeDateOf(c));
+  const undated = all.filter((c) => !closeDateOf(c));
+
+  // ---- stat section (own FY + Quarter toggles, independent of the tables) ----
+  const fyList = [...new Set(dated.map((c) => fyOf(closeDateOf(c))))].sort().reverse();
+  const sf = STATE.winStatFilter;
+  if (sf.fy !== 'All' && !fyList.includes(sf.fy)) sf.fy = 'All';
+  let statCards = dated;
+  if (sf.fy !== 'All') statCards = statCards.filter((c) => fyOf(closeDateOf(c)) === sf.fy);
+  if (sf.q !== 'All') statCards = statCards.filter((c) => quarterOf(closeDateOf(c)) === sf.q);
+  // "All / All" includes undated deals so the headline count matches reality.
+  if (sf.fy === 'All' && sf.q === 'All') statCards = statCards.concat(undated);
+
+  const statMrr = statCards.reduce((s, c) => s + (c.mrr || 0), 0);
+  const statByPse = {};
+  statCards.forEach((c) => {
+    statByPse[c.assignee] = statByPse[c.assignee] || { n: 0, mrr: 0 };
+    statByPse[c.assignee].n++;
+    statByPse[c.assignee].mrr += c.mrr || 0;
+  });
+  const statPses = Object.keys(statByPse).sort((a, b) => statByPse[b].mrr - statByPse[a].mrr);
+
+  const fy2627 = dated.filter((c) => fyOf(closeDateOf(c)) === 'FY 26-27');
+  const fy2526 = dated.filter((c) => fyOf(closeDateOf(c)) === 'FY 25-26');
+  // Any other financial year with wins (e.g. an older FY 24-25 deal) still gets
+  // its own section, so no won deal is ever silently dropped from this tab.
+  const olderFys = fyList.filter((f) => f !== 'FY 26-27' && f !== 'FY 25-26');
+
+  document.getElementById('app').innerHTML = `
+    <div class="page tk-page">
+      <div class="ph"><div class="ph-text">
+        <div class="pht">🏆 Wins &amp; Milestones</div>
+        <div class="phs">Every won / closed deal, live from Jira · close date = Commercial Sign-Off Date · ARR auto-calculated as MRR × 12 · Q1 May–Jul · Q2 Aug–Oct · Q3 Nov–Jan · Q4 Feb–Apr</div>
+      </div></div>
+
+      <div class="win-stats">
+        <div class="win-stats-head">
+          <span class="win-stats-title">Team Scoreboard</span>
+          <div class="win-toggles">
+            <span class="win-tg-label">FY</span>
+            ${['All', ...fyList].map((f) => `<button class="win-chip ${sf.fy === f ? 'active' : ''}" data-win-sfy="${f}">${f}</button>`).join('')}
+            <span class="win-tg-sep"></span>
+            <span class="win-tg-label">Quarter</span>
+            ${['All', ...QUARTERS].map((q) => `<button class="win-chip ${sf.q === q ? 'active' : ''}" data-win-sq="${q}">${q}</button>`).join('')}
+          </div>
+        </div>
+        <div class="krow win-krow">
+          <div class="kpi win-kpi-hero"><div class="kb" style="background:#12B76A"></div><div class="kl">Deals Won</div><div class="kv">${statCards.length}</div><div class="ks">${sf.fy === 'All' ? 'All time' : sf.fy}${sf.q !== 'All' ? ' · ' + sf.q : ''}</div></div>
+          <div class="kpi"><div class="kb" style="background:var(--b)"></div><div class="kl">Total MRR</div><div class="kv" style="font-size:22px">${fmtUsd(statMrr)}</div><div class="ks">Sum of won-deal MRR</div></div>
+          <div class="kpi"><div class="kb" style="background:var(--pu)"></div><div class="kl">Total ARR</div><div class="kv" style="font-size:22px">${fmtUsd(statMrr * 12)}</div><div class="ks">MRR × 12</div></div>
+          <div class="kpi"><div class="kb" style="background:var(--a)"></div><div class="kl">Contributing PSEs</div><div class="kv">${statPses.length}</div><div class="ks">With at least one win</div></div>
+        </div>
+        <div class="win-pse-grid">
+          ${statPses.map((p) => `
+            <div class="win-pse-card">
+              <div class="win-pse-name">${p}</div>
+              <div class="win-pse-n">${statByPse[p].n}<span class="win-pse-n-l">deals</span></div>
+              <div class="win-pse-mrr">${fmtUsd(statByPse[p].mrr)} MRR</div>
+              <div class="win-pse-arr">${fmtUsd(statByPse[p].mrr * 12)} ARR</div>
+            </div>`).join('') || '<div class="empty">No wins match the current filters</div>'}
+        </div>
+      </div>
+
+      ${winFySection('FY 26-27', fy2627, undated)}
+      ${winFySection('FY 25-26', fy2526, null)}
+      ${olderFys.map((f) => winFySection(f, dated.filter((c) => fyOf(closeDateOf(c)) === f), null)).join('')}
+    </div>`;
+
+  document.querySelectorAll('tbody tr[data-key]').forEach((tr) =>
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('.jira-key-link')) return;
+      openWinDetail(tr.dataset.key);
+    })
   );
+  document.querySelectorAll('[data-win-sfy]').forEach((b) =>
+    b.addEventListener('click', () => { STATE.winStatFilter.fy = b.dataset.winSfy; renderTeamView(); })
+  );
+  document.querySelectorAll('[data-win-sq]').forEach((b) =>
+    b.addEventListener('click', () => { STATE.winStatFilter.q = b.dataset.winSq; renderTeamView(); })
+  );
+  document.querySelectorAll('[data-win-q]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const [fy, q] = b.dataset.winQ.split('|');
+      STATE.winTableQuarter[fy] = q;
+      renderTeamView();
+    })
+  );
+  destroyCharts();
+}
+
+// Reuses the shared card modal for a won deal's full detail.
+function openWinDetail(key) {
+  const c = (STATE.winCards || []).find((x) => x.key === key);
+  if (!c) return;
+  const field = (l, v) => `<div><div class="mf-l">${l}</div><div class="mf-v">${v ?? '—'}</div></div>`;
+  const d = (x) => (x ? new Date(x + 'T00:00:00').toLocaleDateString('en-GB') : '—');
+  document.getElementById('modalContent').innerHTML = `
+    <div class="modal-head">
+      <div><div class="modal-key">${c.key}</div><div class="modal-title">${c.summary || ''}</div></div>
+      <button class="modal-close" id="modalCloseBtn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="mfields">
+        ${field('Status', wonLabel(c.status))}
+        ${field('PSE', c.assignee)}
+        ${field('KAM', c.kam)}
+        ${field('Sales Representative', c.salesRep)}
+        ${field('MRR (USD)', c.mrr ? fmtUsd(c.mrr) : '—')}
+        ${field('ARR (USD)', c.mrr ? fmtUsd(c.mrr * 12) : '—')}
+        ${field('Commercial Sign-Off Date', d(c.commercialSignOffDate))}
+        ${field('SoW Sign-Off Date', d(c.sowSignOffDate))}
+        ${field('Financial Year', c.commercialSignOffDate ? fyOf(c.commercialSignOffDate) : '—')}
+        ${field('Quarter', c.commercialSignOffDate ? quarterOf(c.commercialSignOffDate) : '—')}
+      </div>
+      <a class="jira-link" href="${c.url}" target="_blank" rel="noopener">Open in Jira →</a>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
+}
+
+// Exclusive sidebar for this tab: PSE + won-status.
+function renderTeamSidebar() {
+  if (!STATE.facc) loadSidebarPrefs();
+  const f = STATE.winFilters;
+  const cards = STATE.winCards || [];
+  const pses = distinct(cards.map((c) => c.assignee));
+  const statuses = distinct(cards.map((c) => c.status));
+  const activeCount = f.pse.size + f.status.size;
+  const sb = document.getElementById('sidebar');
+  sb.style.display = '';
+  sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
+  sb.innerHTML = `
+    <div class="sb-header">
+      <div class="sb-title">Filters${activeCount ? `<span class="facc-badge">${activeCount}</span>` : ''}</div>
+      <button class="sb-toggle" id="sidebarToggleBtn" title="${STATE.sidebarCollapsed ? 'Expand filters' : 'Collapse filters'}">${STATE.sidebarCollapsed ? '»' : '«'}</button>
+    </div>
+    <div class="sb-content" style="display:${STATE.sidebarCollapsed ? 'none' : ''}">
+      ${faccGroup('pse', 'PSE', checkboxListHtml('pse', pses, f.pse), f.pse.size)}
+      ${faccGroup('status', 'Won Status', checkboxListHtml('status', statuses, f.status, wonLabel), f.status.size)}
+      <button class="clear-btn-full" id="clearWinFiltersBtn">Clear all filters</button>
+    </div>`;
+
+  document.getElementById('sidebarToggleBtn').addEventListener('click', () => {
+    STATE.sidebarCollapsed = !STATE.sidebarCollapsed;
+    localStorage.setItem('psv_sidebar_collapsed', STATE.sidebarCollapsed ? '1' : '0');
+    renderTeamSidebar();
+  });
+  if (STATE.sidebarCollapsed) return;
+
+  document.querySelectorAll('[data-facc-toggle]').forEach((head) => {
+    head.addEventListener('click', () => {
+      const id = head.dataset.faccToggle;
+      STATE.facc[id] = !STATE.facc[id];
+      localStorage.setItem('psv_facc_' + id, STATE.facc[id] ? '1' : '0');
+      head.closest('.facc').classList.toggle('open', STATE.facc[id]);
+    });
+  });
+  document.querySelectorAll('#sidebar [data-mgroup]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const set = STATE.winFilters[cb.dataset.mgroup];
+      if (cb.checked) set.add(cb.value);
+      else set.delete(cb.value);
+      renderTeamView();
+    });
+  });
+  document.getElementById('clearWinFiltersBtn').addEventListener('click', () => {
+    STATE.winFilters = { pse: new Set(), status: new Set() };
+    renderTeamView();
+  });
 }
 
 // ---------- activity log ----------
@@ -3325,7 +3582,7 @@ function render() {
   // Links or Activity Log — those routes swap the same sidebar element for
   // their own filter set instead (see renderQuickLinksSidebar /
   // renderActivitySidebar). Restore the normal Jira sidebar for every other tab.
-  if (!['links', 'activity', 'tracker', 'tat', 'update'].includes(STATE.route.name)) renderSidebar();
+  if (!['links', 'activity', 'tracker', 'tat', 'update', 'team'].includes(STATE.route.name)) renderSidebar();
 
   if (STATE.route.name === 'status') renderStatusDrilldown(STATE.route.param);
   else if (STATE.route.name === 'segment') renderSegment(STATE.route.param);
