@@ -69,11 +69,12 @@ Object.defineProperty(STATE, 'filters', {
 
 const CAT_COLOR = { Done: '#12B76A', 'In Progress': '#0054FC', 'To Do': '#94A3B8', New: '#94A3B8' };
 const POLL_MS = 60 * 1000;
-// Jira Update Check refetches/rebuilds its whole table on every refresh (it's
-// a much heavier page than the others), so it gets its own slower, exclusive
-// cadence instead of riding the main 60s poll — manual "Refresh now" still
-// updates it immediately regardless of this timer.
-const UPDATE_CHECK_POLL_MS = 3 * 60 * 1000;
+// Jira Update Check and Wins & Milestones each do their own fetch and rebuild
+// a whole page of tables on every refresh — much heavier than the other tabs —
+// so they run on their own slower cadence instead of riding the main 60s poll.
+// Manual "Refresh now" still updates them immediately regardless of this timer.
+const SLOW_POLL_MS = 3 * 60 * 1000;
+const SLOW_POLL_ROUTES = { update: () => renderUpdateCheck(), team: () => renderTeam() };
 
 // ---------- data ----------
 async function loadData() {
@@ -3676,16 +3677,17 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
   setInterval(async () => {
     try {
       await loadData();
-      // Skip the full render dispatch while on Jira Update Check — that tab
-      // refreshes on its own slower, dedicated timer instead (see below).
-      // STATE.data is still refreshed silently so other tabs stay current.
-      if (STATE.route.name !== 'update') render();
+      // Skip the full render dispatch while on a slow-poll tab — those refresh
+      // on their own dedicated timer below. STATE.data is still refreshed
+      // silently so every other tab is current the moment you switch to it.
+      if (!SLOW_POLL_ROUTES[STATE.route.name]) render();
     } catch (err) {
       console.error('Poll failed', err);
     }
   }, POLL_MS);
 
   setInterval(() => {
-    if (STATE.route.name === 'update') renderUpdateCheck();
-  }, UPDATE_CHECK_POLL_MS);
+    const refresh = SLOW_POLL_ROUTES[STATE.route.name];
+    if (refresh) refresh();
+  }, SLOW_POLL_MS);
 })();
