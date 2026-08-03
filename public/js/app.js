@@ -2003,18 +2003,20 @@ function workingDaysAfter(from, to) {
 // Working days late against the CURRENT (flexible) due date — 0 if on time or
 // no due date. For a Done task, measured to its completion; for an open task,
 // to the reference day.
+// "Delayed" means only one thing: still open and past its CURRENT due date.
+//   - Finishing late is not a delay — once a task is Done it's never counted,
+//     no matter when it was actually completed.
+//   - Moving a due date is not a delay — the count always measures against the
+//     current due date, so pushing it out clears the flag immediately.
+// Every delay signal on this tab (red row, summary tile, report tables) comes
+// from this one function, so they all stay consistent.
 function taskDelayDays(task, referenceDay = istToday()) {
+  if (task.status === 'Done') return 0;
   const due = task.dueDate;
   if (!due) return 0;
-  const endRef = task.status === 'Done' ? task.completedDate || referenceDay : referenceDay;
-  return workingDaysAfter(due, endRef);
+  return workingDaysAfter(due, referenceDay);
 }
-// Red row = still open and past due — an active signal that needs attention.
-// A Done task is never flagged red here, no matter how late it was actually
-// finished: "overdue" means unresolved, not "was once late". Late completions
-// still count in the report tables' Delayed column via taskDelayDays directly.
 function taskOverdue(task, referenceDay = istToday()) {
-  if (task.status === 'Done') return false;
   return taskDelayDays(task, referenceDay) > 0;
 }
 
