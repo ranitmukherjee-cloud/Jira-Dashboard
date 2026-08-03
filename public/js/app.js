@@ -37,6 +37,9 @@ const STATE = {
   tatFilters: { pse: new Set(), status: new Set(), health: new Set(), kam: new Set(), salesRep: new Set(), dealSize: '' },
   tatBox: 'all',
   tatSort: {}, // per-table sort state: { fy2627:{key,dir}, fy2526:{...}, poc:{...} }
+  overviewCards: [],
+  ovFilters: { pse: new Set(), kam: new Set(), salesRep: new Set(), quarter: 'All' },
+  ovSegment: 'all', // which segment the detail table shows
   winCards: [],
   winFilters: { pse: new Set(), status: new Set() },
   winStatFilter: { fy: 'All', q: 'All' }, // scoreboard toggles
@@ -74,7 +77,7 @@ const POLL_MS = 60 * 1000;
 // so they run on their own slower cadence instead of riding the main 60s poll.
 // Manual "Refresh now" still updates them immediately regardless of this timer.
 const SLOW_POLL_MS = 3 * 60 * 1000;
-const SLOW_POLL_ROUTES = { update: () => renderUpdateCheck(), team: () => renderTeam() };
+const SLOW_POLL_ROUTES = { update: () => renderUpdateCheck(), team: () => renderTeam(), overview: () => renderOverview() };
 
 // ---------- data ----------
 async function loadData() {
@@ -536,97 +539,316 @@ function addChart(canvasId, type, labels, datasets, extraOptions = {}, onBarClic
   STATE.charts.push(chart);
 }
 
-// ---------- overview ----------
-function renderOverview() {
-  const base = applyFilters(STATE.data.issues, { skipStatus: true });
+// ---------- overview (consolidated exec view) ----------
+// One live pull covering four segments the CEO cares about: Active Pipeline,
+// Won FY 26-27, Check in 3 Months and Churn. Built from its own endpoint
+// because /api/data deliberately hides won and churn cards.
+const OV_ACTIVE_STATUSES = ['Req. Gathering', 'Solution Design', 'Pending On Client', 'Solutions Draft Shared', 'COMMERCIALS', 'Solutioning (Post closure)'];
+const OV_WON_STATUSES = ['Closure/Contract Won', 'Solutioning (Post closure)', 'In Progress', 'Completed', 'Under Deployment', 'First Phase Live', 'First Value', 'Final Refrenceable', 'Partial Refrenceable', 'Partial GoLive', 'Final Golive'];
+const OV_CHURN_STATUSES = ['Churn', 'Churn/Check in 3 Months'];
+const OV_CHECK_IN = 'Check in 3 Months';
+const OV_FY = 'FY 26-27';
 
-  const statusCounts = {};
-  base.forEach((i) => {
-    statusCounts[i.status || 'Unknown'] = (statusCounts[i.status || 'Unknown'] || 0) + 1;
+const OV_SEGMENTS = [
+  { key: 'active', label: 'Active Pipeline', short: 'Active', color: '#3B5BFF', sub: 'Open & in motion' },
+  { key: 'won', label: `Won ${OV_FY}`, short: 'Won', color: '#12B76A', sub: 'Closed / won this FY' },
+  { key: 'c3m', label: 'Check in 3 Months', short: 'Check-in', color: '#D97706', sub: 'Parked, revisit later' },
+  { key: 'churn', label: 'Churn', short: 'Churn', color: '#E11D48', sub: 'Lost deals' },
+];
+const OV_SEG_BY_KEY = Object.fromEntries(OV_SEGMENTS.map((s) => [s.key, s]));
+
+// "Solutioning (Post closure)" is listed under BOTH active and won. Won is
+// checked first, so a card that closed this FY counts once as Won and never
+// double-counts into Active.
+function ovSegmentOf(c) {
+  if (OV_CHURN_STATUSES.includes(c.status)) return 'churn';
+  if (c.status === OV_CHECK_IN) return 'c3m';
+  if (OV_WON_STATUSES.includes(c.status) && c.commercialSignOffDate && fyOf(c.commercialSignOffDate) === OV_FY) return 'won';
+  if (OV_ACTIVE_STATUSES.includes(c.status)) return 'active';
+  return null; // won in an earlier FY — lives on the Wins tab, not here
+}
+
+function applyOvFilters(cards) {
+  const f = STATE.ovFilters;
+  return cards.filter((c) => {
+    if (f.pse.size && !f.pse.has(winPse(c))) return false;
+    if (f.kam.size && !f.kam.has(c.kam || '—')) return false;
+    if (f.salesRep.size && !f.salesRep.has(c.salesRep || '—')) return false;
+    if (f.quarter !== 'All') {
+      const d = c.commercialSignOffDate;
+      if (!d || quarterOf(d) !== f.quarter) return false;
+    }
+    return true;
   });
-  const statusEntries = Object.entries(statusCounts).sort((a, b) => b[1] - a[1]);
+}
 
-  const activeCount = base.filter((i) => i.stageGroup === 'active').length;
-  const coldCount = base.filter((i) => i.stageGroup === 'cold').length;
-  const stuckCount = base.filter((i) => i.stageGroup === 'active' && daysSince(i.updated) >= 14).length;
-  const totalMrr = base.filter((i) => !isMrrMissing(i.mrr)).reduce((s, i) => s + i.mrr, 0);
+async function renderOverview() {
+  document.getElementById('app').innerHTML = '<div class="page"><div class="loading">Loading consolidated overview…</div></div>';
+  try {
+    const res = await fetch('/api/update-check?set=overview', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    STATE.overviewCards = (await res.json()).cards || [];
+  } catch (err) {
+    document.getElementById('app').innerHTML = `<div class="page"><div class="empty">Could not load overview: ${err.message}</div></div>`;
+    return;
+  }
+  renderOverviewView();
+}
 
-  const pseCounts = {};
-  base.forEach((i) => (pseCounts[i.assignee] = (pseCounts[i.assignee] || 0) + 1));
-  const pseEntries = Object.entries(pseCounts).sort((a, b) => b[1] - a[1]);
+function ovDealRow(c, seg) {
+  const arr = c.mrr ? c.mrr * 12 : null;
+  const meta = OV_SEG_BY_KEY[seg];
+  const dot = meta ? `<span class="ov-dot" style="background:${meta.color}"></span>` : '';
+  // Colour the status by segment rather than Jira's statusCategory — won and
+  // churn cards aren't in STATE.data.issues, so fbadge() would grey them out.
+  const badge = meta
+    ? `<span class="ov-badge" style="--ovc:${meta.color}">${wonLabel(c.status)}</span>`
+    : `<span class="bd bgy">${wonLabel(c.status)}</span>`;
+  return `
+    <tr data-key="${c.key}">
+      <td><a class="jira-key-link" href="${c.url}" target="_blank" rel="noopener" title="Open ${c.key} in Jira">${c.key} ↗</a></td>
+      <td class="ov-client">${dot}${c.summary || '—'}</td>
+      <td>${badge}</td>
+      <td>${winPse(c)}</td>
+      <td>${c.kam || '<span class="tat-blank">—</span>'}</td>
+      <td>${c.salesRep || '<span class="tat-blank">—</span>'}</td>
+      <td class="win-num">${c.mrr ? fmtUsd(c.mrr) : '<span class="tat-blank">—</span>'}</td>
+      <td class="win-num">${arr ? fmtUsd(arr) : '<span class="tat-blank">—</span>'}</td>
+      <td>${c.solutioningStartDate ? new Date(c.solutioningStartDate + 'T00:00:00').toLocaleDateString('en-GB') : '<span class="tat-blank">—</span>'}</td>
+      <td>${c.expectedSalesClosure ? new Date(c.expectedSalesClosure + 'T00:00:00').toLocaleDateString('en-GB') : '<span class="tat-blank">—</span>'}</td>
+      <td>${c.commercialSignOffDate ? new Date(c.commercialSignOffDate + 'T00:00:00').toLocaleDateString('en-GB') : '<span class="tat-blank">—</span>'}</td>
+    </tr>`;
+}
 
-  const modCounts = {};
-  base.forEach((i) => (i.modules || []).forEach((m) => (modCounts[m] = (modCounts[m] || 0) + 1)));
-  const modEntries = Object.entries(modCounts).sort((a, b) => b[1] - a[1]);
+function renderOverviewView() {
+  renderOverviewSidebar();
+  const all = applyOvFilters(STATE.overviewCards || []);
+
+  // Bucket once, reuse everywhere.
+  const seg = { active: [], won: [], c3m: [], churn: [] };
+  all.forEach((c) => { const s = ovSegmentOf(c); if (s) seg[s].push(c); });
+  const mrrOf = (list) => list.reduce((s, c) => s + (c.mrr || 0), 0);
+  const inScope = [...seg.active, ...seg.won, ...seg.c3m, ...seg.churn];
+
+  // Per-PSE scorecard: Active vs Won side by side, plus check-in / churn.
+  const pseSet = [...new Set(inScope.map(winPse))].sort();
+  const rows = pseSet.map((p) => {
+    const a = seg.active.filter((c) => winPse(c) === p);
+    const w = seg.won.filter((c) => winPse(c) === p);
+    const k = seg.c3m.filter((c) => winPse(c) === p);
+    const ch = seg.churn.filter((c) => winPse(c) === p);
+    const decided = w.length + ch.length;
+    return { p, a, w, k, ch, aMrr: mrrOf(a), wMrr: mrrOf(w), winRate: decided ? Math.round((w.length / decided) * 100) : null };
+  }).sort((x, y) => y.wMrr - x.wMrr || y.aMrr - x.aMrr);
+
+  const tot = {
+    a: seg.active.length, w: seg.won.length, k: seg.c3m.length, ch: seg.churn.length,
+    aMrr: mrrOf(seg.active), wMrr: mrrOf(seg.won),
+  };
+  tot.winRate = tot.w + tot.ch ? Math.round((tot.w / (tot.w + tot.ch)) * 100) : null;
+  const maxBar = Math.max(1, ...rows.map((r) => Math.max(r.a.length, r.w.length)));
+
+  const detailSeg = STATE.ovSegment;
+  const detailList = (detailSeg === 'all' ? inScope : seg[detailSeg] || []).slice()
+    .sort((x, y) => (y.mrr || 0) - (x.mrr || 0));
+  const detailLabel = detailSeg === 'all' ? 'All Deals' : OV_SEG_BY_KEY[detailSeg].label;
+
+  const f = STATE.ovFilters;
+  const pseChips = [...new Set((STATE.overviewCards || []).map(winPse))].sort();
 
   document.getElementById('app').innerHTML = `
-    <div class="page">
-      <div class="ph"><div class="pht">Overview</div><div class="phs">Live from Jira PSV board · Project Cards only, closed/won deals excluded · click a status block, KPI, or chart bar to drill in</div></div>
-      <div class="krow">
-        <div class="kpi kpi-tint"><div class="kb"></div><div class="kl">Total Deals</div><div class="kv">${base.length}</div><div class="ks">Matching current filters</div></div>
-        <div class="kpi kpi-tint seg-kpi" data-segment="active" style="--kc:var(--b)"><div class="kb" style="background:var(--b)"></div><div class="kl">Active</div><div class="kv">${activeCount}</div><div class="ks">In pipeline</div></div>
-        <div class="kpi kpi-tint seg-kpi" data-segment="cold" style="--kc:var(--a)"><div class="kb" style="background:var(--a)"></div><div class="kl">Cold / C3M</div><div class="kv">${coldCount}</div><div class="ks">Check in 3 months</div></div>
-        <div class="kpi kpi-tint seg-kpi" data-segment="stuck" style="--kc:var(--a)"><div class="kb" style="background:var(--a)"></div><div class="kl">Stuck 14d+</div><div class="kv">${stuckCount}</div><div class="ks">Active, not moved recently</div></div>
-        <div class="kpi kpi-tint" style="--kc:var(--b)"><div class="kb" style="background:var(--b)"></div><div class="kl">Total MRR</div><div class="kv" style="font-size:22px">${fmtUsd(totalMrr)}</div><div class="ks"><a href="#/mrr">View MRR tab →</a></div></div>
-      </div>
+    <div class="page tk-page">
+      <div class="ph"><div class="ph-text">
+        <div class="pht">Overview</div>
+        <div class="phs">Consolidated live view from Jira · Active Pipeline · Won ${OV_FY} · Check in 3 Months · Churn · ARR = MRR × 12</div>
+      </div></div>
 
-      <div class="sh"><div class="sht">Deals by Status</div><div class="shl"></div><div class="shb">Scroll for more, like the Jira board</div></div>
-      <div class="board-strip" id="statusBlocks">
-        ${statusEntries
-          .map(([status, count]) => {
-            const cat = base.find((i) => i.status === status)?.statusCategory;
-            const color = CAT_COLOR[cat] || '#94A3B8';
-            const pct = ((count / (base.length || 1)) * 100).toFixed(1);
-            return `<div class="bcol" data-status="${escapeAttr(status)}">
-              <div class="bcol-head" style="background:${color}">${status}</div>
-              <div class="bcol-body">
-                <div class="bcol-count">${count}</div>
-                <div class="bcol-pct">${pct}% of ${base.length}</div>
-              </div>
+      <div class="ov-bar">
+        <div class="ov-bar-head">
+          <span class="ov-bar-title">Executive Snapshot</span>
+          <div class="win-toggles">
+            <span class="win-tg-label">Quarter</span>
+            ${['All', 'Q1', 'Q2', 'Q3', 'Q4'].map((q) => `<button class="win-chip ${f.quarter === q ? 'active' : ''}" data-ov-q="${q}">${q}</button>`).join('')}
+          </div>
+        </div>
+        ${pseChips.length > 1 ? `
+        <div class="ov-pse-chips">
+          <span class="win-tg-label">PSE</span>
+          <button class="win-chip ${!f.pse.size ? 'active' : ''}" data-ov-pse="__all">All</button>
+          ${pseChips.map((p) => `<button class="win-chip ${f.pse.has(p) ? 'active' : ''}" data-ov-pse="${escapeAttr(p)}">${p}</button>`).join('')}
+        </div>` : ''}
+        <div class="ov-hero">
+          ${OV_SEGMENTS.map((s) => {
+            const list = seg[s.key];
+            const m = mrrOf(list);
+            return `
+            <div class="ov-card ${detailSeg === s.key ? 'sel' : ''}" data-ov-seg="${s.key}" style="--ovc:${s.color}">
+              <div class="ov-card-top"><span class="ov-card-dot"></span><span class="ov-card-label">${s.label}</span></div>
+              <div class="ov-card-n">${list.length}</div>
+              <div class="ov-card-mrr">${fmtUsd(m)} MRR</div>
+              <div class="ov-card-arr">${fmtUsd(m * 12)} ARR · ${s.sub}</div>
             </div>`;
-          })
-          .join('')}
+          }).join('')}
+        </div>
       </div>
 
-      <div class="g2">
-        <div class="card"><div class="ct">PSE Workload</div><div class="cs">Cards per PSE (filtered) · click a bar</div><div style="height:${hBarHeight(pseEntries.length)}"><canvas id="pseChart"></canvas></div></div>
-        <div class="card"><div class="ct">Module Interest</div><div class="cs">How often each module is requested · click a bar</div><div style="height:${hBarHeight(modEntries.length)}"><canvas id="modChart"></canvas></div></div>
+      <div class="sh"><div class="sht">CEO Scorecard — Active Pipeline vs Won ${OV_FY}</div><div class="shl"></div><div class="shb">Per PSE · win rate = won ÷ (won + churn)</div></div>
+      <div class="tc">
+        <div class="tw">
+          <table class="ov-score">
+            <thead><tr>
+              <th>PSE</th><th class="ov-cmp-th">Active vs Won</th>
+              <th class="win-num">Active</th><th class="win-num">Active MRR</th>
+              <th class="win-num">Won</th><th class="win-num">Won MRR</th>
+              <th class="win-num">Win Rate</th><th class="win-num">Check-in 3M</th><th class="win-num">Churn</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r) => `
+                <tr>
+                  <td class="ov-pse-name">${r.p}</td>
+                  <td class="ov-cmp">
+                    <span class="ov-mini"><i class="ov-mini-a" style="width:${(r.a.length / maxBar) * 100}%"></i></span>
+                    <span class="ov-mini"><i class="ov-mini-w" style="width:${(r.w.length / maxBar) * 100}%"></i></span>
+                  </td>
+                  <td class="win-num ov-b">${r.a.length}</td>
+                  <td class="win-num">${fmtUsd(r.aMrr)}</td>
+                  <td class="win-num ov-g">${r.w.length}</td>
+                  <td class="win-num">${fmtUsd(r.wMrr)}</td>
+                  <td class="win-num">${r.winRate == null ? '<span class="tat-blank">—</span>' : `<span class="rate-pill ${r.winRate >= 60 ? 'rate-good' : r.winRate >= 30 ? 'rate-mid' : 'rate-bad'}">${r.winRate}%</span>`}</td>
+                  <td class="win-num ov-a">${r.k.length}</td>
+                  <td class="win-num ov-r">${r.ch.length}</td>
+                </tr>`).join('') || '<tr><td colspan="9" class="empty">No deals match the current filters</td></tr>'}
+            </tbody>
+            <tfoot><tr class="win-foot">
+              <td>TOTAL</td><td></td>
+              <td class="win-num">${tot.a}</td><td class="win-num">${fmtUsd(tot.aMrr)}</td>
+              <td class="win-num">${tot.w}</td><td class="win-num">${fmtUsd(tot.wMrr)}</td>
+              <td class="win-num">${tot.winRate == null ? '—' : tot.winRate + '%'}</td>
+              <td class="win-num">${tot.k}</td><td class="win-num">${tot.ch}</td>
+            </tr></tfoot>
+          </table>
+        </div>
       </div>
 
-      ${STATE.history.length > 1 ? `
-      <div class="sh"><div class="sht">Trends</div><div class="shl"></div><div class="shb">Daily snapshots, unfiltered board totals</div></div>
-      <div class="g2">
-        <div class="card"><div class="ct">Total Deals Over Time</div><div class="cs">${STATE.history.length} day(s) of history</div><div style="height:220px"><canvas id="trendCountChart"></canvas></div></div>
-        <div class="card"><div class="ct">Total MRR Over Time</div><div class="cs">Sum of valid MRR values (USD)</div><div style="height:220px"><canvas id="trendMrrChart"></canvas></div></div>
-      </div>` : ''}
+      <div class="card" style="margin:18px 0"><div class="ct">Active vs Won by PSE</div><div class="cs">Deal counts side by side · click a bar to filter that PSE</div><div style="height:${hBarHeight(rows.length)}"><canvas id="ovCmpChart"></canvas></div></div>
+
+      <div class="sh"><div class="sht">Deal Detail</div><div class="shl"></div></div>
+      <div class="win-qchips">
+        <button class="win-chip ${detailSeg === 'all' ? 'active' : ''}" data-ov-seg2="all">All <span class="win-chip-n">${inScope.length}</span></button>
+        ${OV_SEGMENTS.map((s) => `<button class="win-chip ${detailSeg === s.key ? 'active' : ''}" data-ov-seg2="${s.key}">${s.short} <span class="win-chip-n">${seg[s.key].length}</span></button>`).join('')}
+      </div>
+      <div class="tc">
+        <div class="th"><span class="tht">${detailLabel}</span><span class="ths">${detailList.length} deal(s) · ${fmtUsd(mrrOf(detailList))} MRR</span>
+          ${detailList.length ? '<button class="clear-btn" id="ovExportBtn" style="margin-left:auto">Export CSV</button>' : ''}</div>
+        <div class="tw">
+          <table class="win-table">
+            <thead><tr><th>Key</th><th style="width:20%">Client</th><th>Status</th><th>PSE</th><th>KAM</th><th>Sales Rep</th><th>MRR</th><th>ARR</th><th>Sol. Start</th><th>Exp. Closure</th><th>Commercial Sign-Off</th></tr></thead>
+            <tbody>${detailList.map((c) => ovDealRow(c, ovSegmentOf(c))).join('') || '<tr><td colspan="11" class="empty">No deals in this view</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
     </div>`;
 
-  document.querySelectorAll('#statusBlocks .bcol').forEach((el) => {
-    el.addEventListener('click', () => navigate(`/status/${encodeURIComponent(el.dataset.status)}`));
-  });
-  document.querySelectorAll('.seg-kpi').forEach((el) => {
-    el.addEventListener('click', () => navigate(`/segment/${el.dataset.segment}`));
+  // --- interactions ---
+  document.querySelectorAll('[data-ov-q]').forEach((b) =>
+    b.addEventListener('click', () => { STATE.ovFilters.quarter = b.dataset.ovQ; renderOverviewView(); }));
+  document.querySelectorAll('[data-ov-pse]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const p = b.dataset.ovPse;
+      if (p === '__all') STATE.ovFilters.pse = new Set();
+      else if (STATE.ovFilters.pse.has(p)) STATE.ovFilters.pse.delete(p);
+      else STATE.ovFilters.pse.add(p);
+      renderOverviewView();
+    }));
+  document.querySelectorAll('[data-ov-seg]').forEach((el) =>
+    el.addEventListener('click', () => { STATE.ovSegment = el.dataset.ovSeg; renderOverviewView(); }));
+  document.querySelectorAll('[data-ov-seg2]').forEach((b) =>
+    b.addEventListener('click', () => { STATE.ovSegment = b.dataset.ovSeg2; renderOverviewView(); }));
+  document.querySelectorAll('.win-table tbody tr[data-key]').forEach((tr) =>
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('.jira-key-link')) return;
+      openWinDetail(tr.dataset.key, STATE.overviewCards);
+    }));
+  const exp = document.getElementById('ovExportBtn');
+  if (exp) exp.addEventListener('click', () => {
+    downloadCsv('psv-overview.csv', toCsv(detailList, [
+      { label: 'Key', value: (r) => r.key },
+      { label: 'Client', value: (r) => r.summary },
+      { label: 'Segment', value: (r) => (OV_SEG_BY_KEY[ovSegmentOf(r)] || {}).label || '' },
+      { label: 'Status', value: (r) => wonLabel(r.status) },
+      { label: 'PSE', value: (r) => winPse(r) },
+      { label: 'KAM', value: (r) => r.kam },
+      { label: 'Sales Rep', value: (r) => r.salesRep },
+      { label: 'MRR', value: (r) => r.mrr },
+      { label: 'ARR', value: (r) => (r.mrr ? r.mrr * 12 : '') },
+      { label: 'Solutioning Start', value: (r) => r.solutioningStartDate },
+      { label: 'Expected Closure', value: (r) => r.expectedSalesClosure },
+      { label: 'Commercial Sign-Off', value: (r) => r.commercialSignOffDate },
+      { label: 'Jira URL', value: (r) => r.url },
+    ]));
   });
 
   destroyCharts();
   addChart(
-    'pseChart', 'bar', pseEntries.map((e) => e[0]),
-    [{ label: 'Cards', data: pseEntries.map((e) => e[1]), backgroundColor: '#0054FC' }],
-    { indexAxis: 'y' },
-    (pse) => goToFilteredList(`PSE: ${pse}`, (i) => i.assignee === pse)
+    'ovCmpChart', 'bar', rows.map((r) => r.p),
+    [
+      { label: 'Active Pipeline', data: rows.map((r) => r.a.length), backgroundColor: '#3B5BFF' },
+      { label: `Won ${OV_FY}`, data: rows.map((r) => r.w.length), backgroundColor: '#12B76A' },
+    ],
+    { indexAxis: 'y', plugins: { legend: { display: true, position: 'bottom' } }, scales: { y: { ticks: { autoSkip: false } } } },
+    (pse) => { STATE.ovFilters.pse = new Set([pse]); renderOverviewView(); }
   );
-  addChart(
-    'modChart', 'bar', modEntries.map((e) => e[0]),
-    [{ label: 'Cards', data: modEntries.map((e) => e[1]), backgroundColor: '#12B76A' }],
-    { indexAxis: 'y' },
-    (mod) => goToFilteredList(`Module: ${mod}`, (i) => (i.modules || []).includes(mod))
-  );
+}
 
-  if (STATE.history.length > 1) {
-    const labels = STATE.history.map((h) => h.date);
-    addChart('trendCountChart', 'line', labels, [{ label: 'Total deals', data: STATE.history.map((h) => h.count), borderColor: '#0054FC', tension: 0.3, fill: false }]);
-    addChart('trendMrrChart', 'line', labels, [{ label: 'Total MRR', data: STATE.history.map((h) => h.totalMrr), borderColor: '#12B76A', tension: 0.3, fill: false }]);
-  }
+// Exclusive sidebar for Overview: KAM / Sales Rep (PSE + quarter live in the header).
+function renderOverviewSidebar() {
+  if (!STATE.facc) loadSidebarPrefs();
+  const f = STATE.ovFilters;
+  const cards = STATE.overviewCards || [];
+  const kams = distinct(cards.map((c) => c.kam || '—'));
+  const reps = distinct(cards.map((c) => c.salesRep || '—'));
+  const activeCount = f.kam.size + f.salesRep.size + f.pse.size + (f.quarter !== 'All' ? 1 : 0);
+  const sb = document.getElementById('sidebar');
+  sb.style.display = '';
+  sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
+  sb.innerHTML = `
+    <div class="sb-header">
+      <div class="sb-title">Filters${activeCount ? `<span class="facc-badge">${activeCount}</span>` : ''}</div>
+      <button class="sb-toggle" id="sidebarToggleBtn" title="${STATE.sidebarCollapsed ? 'Expand filters' : 'Collapse filters'}">${STATE.sidebarCollapsed ? '»' : '«'}</button>
+    </div>
+    <div class="sb-content" style="display:${STATE.sidebarCollapsed ? 'none' : ''}">
+      ${faccGroup('kam', 'KAM', checkboxListHtml('kam', kams, f.kam), f.kam.size)}
+      ${faccGroup('salesRep', 'Sales Representative', checkboxListHtml('salesRep', reps, f.salesRep), f.salesRep.size)}
+      <button class="clear-btn-full" id="clearOvFiltersBtn">Clear all filters</button>
+    </div>`;
+
+  document.getElementById('sidebarToggleBtn').addEventListener('click', () => {
+    STATE.sidebarCollapsed = !STATE.sidebarCollapsed;
+    localStorage.setItem('psv_sidebar_collapsed', STATE.sidebarCollapsed ? '1' : '0');
+    renderOverviewSidebar();
+  });
+  if (STATE.sidebarCollapsed) return;
+
+  document.querySelectorAll('[data-facc-toggle]').forEach((head) => {
+    head.addEventListener('click', () => {
+      const id = head.dataset.faccToggle;
+      STATE.facc[id] = !STATE.facc[id];
+      localStorage.setItem('psv_facc_' + id, STATE.facc[id] ? '1' : '0');
+      head.closest('.facc').classList.toggle('open', STATE.facc[id]);
+    });
+  });
+  document.querySelectorAll('#sidebar [data-mgroup]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const set = STATE.ovFilters[cb.dataset.mgroup];
+      if (cb.checked) set.add(cb.value);
+      else set.delete(cb.value);
+      renderOverviewView();
+    });
+  });
+  document.getElementById('clearOvFiltersBtn').addEventListener('click', () => {
+    STATE.ovFilters = { pse: new Set(), kam: new Set(), salesRep: new Set(), quarter: 'All' };
+    renderOverviewView();
+  });
 }
 
 // ---------- status drilldown ----------
@@ -1602,8 +1824,8 @@ function renderTeamView() {
 }
 
 // Reuses the shared card modal for a won deal's full detail.
-function openWinDetail(key) {
-  const c = (STATE.winCards || []).find((x) => x.key === key);
+function openWinDetail(key, source) {
+  const c = (source || STATE.winCards || []).find((x) => x.key === key);
   if (!c) return;
   const field = (l, v) => `<div><div class="mf-l">${l}</div><div class="mf-v">${v ?? '—'}</div></div>`;
   const d = (x) => (x ? new Date(x + 'T00:00:00').toLocaleDateString('en-GB') : '—');
@@ -3591,7 +3813,7 @@ function render() {
   // Links or Activity Log — those routes swap the same sidebar element for
   // their own filter set instead (see renderQuickLinksSidebar /
   // renderActivitySidebar). Restore the normal Jira sidebar for every other tab.
-  if (!['links', 'activity', 'tracker', 'tat', 'update', 'team'].includes(STATE.route.name)) renderSidebar();
+  if (!['links', 'activity', 'tracker', 'tat', 'update', 'team', 'overview'].includes(STATE.route.name)) renderSidebar();
 
   if (STATE.route.name === 'status') renderStatusDrilldown(STATE.route.param);
   else if (STATE.route.name === 'segment') renderSegment(STATE.route.param);

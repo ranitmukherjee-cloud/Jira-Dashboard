@@ -590,3 +590,41 @@ tr.row-early:hover td{background:#D6F5E3 !important;}
 .win-pse-unassigned{border:1.5px solid #FCD9A8;}
 .win-pse-unassigned .th{background:linear-gradient(135deg,#B45309 0%,#92400E 100%) !important;}
 .win-pse-unassigned .win-total-pill{color:#FDE68A;background:rgba(253,230,138,.16);}
+
+/* ===== OVERVIEW TAB (consolidated exec view) ===== */
+.ov-bar{background:linear-gradient(140deg,#0B1220 0%,#16203A 55%,#241A47 100%);border-radius:16px;padding:18px 20px 20px;margin-bottom:26px;box-shadow:0 10px 30px rgba(11,18,32,.22);}
+.ov-bar-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px;}
+.ov-bar-title{font-size:15px;font-weight:900;color:#fff;letter-spacing:.2px;}
+.ov-pse-chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.1);}
+
+/* Four hero segment cards — click one to drive the detail table below */
+.ov-hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;}
+.ov-card{background:rgba(255,255,255,.055);border:1.5px solid rgba(255,255,255,.1);border-left:4px solid var(--ovc);border-radius:13px;padding:14px 16px;cursor:pointer;transition:transform .14s,background .14s,box-shadow .14s;}
+.ov-card:hover{transform:translateY(-3px);background:rgba(255,255,255,.11);box-shadow:0 8px 22px rgba(0,0,0,.28);}
+.ov-card.sel{background:rgba(255,255,255,.13);border-color:var(--ovc);box-shadow:0 0 0 2px color-mix(in srgb,var(--ovc) 45%,transparent);}
+.ov-card-top{display:flex;align-items:center;gap:7px;margin-bottom:9px;}
+.ov-card-dot{width:9px;height:9px;border-radius:50%;background:var(--ovc);flex-shrink:0;box-shadow:0 0 0 3px color-mix(in srgb,var(--ovc) 22%,transparent);}
+.ov-card-label{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#AEB9D0;}
+.ov-card-n{font-size:32px;font-weight:900;line-height:1;color:#fff;}
+.ov-card-mrr{font-size:13px;font-weight:800;color:var(--ovc);margin-top:7px;}
+.ov-card-arr{font-size:10.5px;font-weight:600;color:#6F7C99;margin-top:2px;}
+
+/* CEO scorecard */
+.ov-score thead th{background:var(--n);color:#fff;font-size:10.5px;font-weight:800;letter-spacing:.5px;border-right:1px solid rgba(255,255,255,.14);}
+.ov-score thead th:last-child{border-right:none;}
+.ov-score td{font-size:12px;}
+.ov-pse-name{font-weight:800;color:var(--n);}
+.ov-b{color:var(--b);font-weight:800;}
+.ov-g{color:#047857;font-weight:800;}
+.ov-a{color:var(--a);font-weight:800;}
+.ov-r{color:var(--r);font-weight:800;}
+.ov-cmp-th{width:130px;}
+.ov-cmp{width:130px;padding:6px 14px !important;}
+.ov-mini{display:block;height:7px;background:var(--nl);border-radius:20px;overflow:hidden;margin:3px 0;}
+.ov-mini i{display:block;height:100%;border-radius:20px;transition:width .3s ease;}
+.ov-mini-a{background:#3B5BFF;}
+.ov-mini-w{background:#12B76A;}
+
+.ov-client{font-weight:700;color:var(--n);}
+.ov-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:middle;}
+.ov-badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:800;white-space:nowrap;color:var(--ovc);background:color-mix(in srgb,var(--ovc) 12%,transparent);border:1px solid color-mix(in srgb,var(--ovc) 30%,transparent);}

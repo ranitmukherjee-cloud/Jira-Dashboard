@@ -5,7 +5,8 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { getLiveData } = require('./lib/live');
-const { UPDATE_CHECK_STATUSES, WON_STATUSES } = require('./lib/jira');
+const { UPDATE_CHECK_STATUSES, WON_STATUSES, OVERVIEW_STATUSES } = require('./lib/jira');
+const SET_STATUSES = { won: WON_STATUSES, overview: OVERVIEW_STATUSES };
 const { listTasks, createTask, updateTask, deleteTask, listLeave, setLeaveStatus, listHolidays, setHolidayStatus } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
 const { listLinks, addLink, updateLink, reorderLinks, deleteLink, listGroups, createGroup, renameGroup, deleteGroup } = require('./lib/quickLinks');
@@ -83,9 +84,9 @@ app.get('/api/data', async (req, res) => {
 app.get('/api/update-check', async (req, res) => {
   try {
     const { allCards, unassignedCards, generatedAt } = await getLiveData();
-    const won = req.query.set === 'won';
-    const statuses = won ? WON_STATUSES : UPDATE_CHECK_STATUSES;
-    const pool = won ? [...(allCards || []), ...(unassignedCards || [])] : allCards || [];
+    const set = req.query.set;
+    const statuses = SET_STATUSES[set] || UPDATE_CHECK_STATUSES;
+    const pool = SET_STATUSES[set] ? [...(allCards || []), ...(unassignedCards || [])] : allCards || [];
     const cards = pool.filter((c) => statuses.includes(c.status));
     res.json({ generatedAt, count: cards.length, cards });
   } catch (err) {

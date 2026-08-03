@@ -1,5 +1,7 @@
 const { getLiveData } = require('../lib/live');
-const { UPDATE_CHECK_STATUSES, WON_STATUSES } = require('../lib/jira');
+const { UPDATE_CHECK_STATUSES, WON_STATUSES, OVERVIEW_STATUSES } = require('../lib/jira');
+
+const SET_STATUSES = { won: WON_STATUSES, overview: OVERVIEW_STATUSES };
 
 // Serves status-filtered slices of the full assigned card set (which includes
 // won/churn/check-in cards the main dashboard hides):
@@ -10,11 +12,11 @@ const { UPDATE_CHECK_STATUSES, WON_STATUSES } = require('../lib/jira');
 module.exports = async (req, res) => {
   try {
     const { allCards, unassignedCards, generatedAt } = await getLiveData();
-    const won = req.query.set === 'won';
-    const statuses = won ? WON_STATUSES : UPDATE_CHECK_STATUSES;
-    // The wins tab also surfaces unassigned cards (grouped as "Unassigned");
-    // every other consumer keeps the no-unassigned policy.
-    const pool = won ? [...(allCards || []), ...(unassignedCards || [])] : allCards || [];
+    const set = req.query.set;
+    const statuses = SET_STATUSES[set] || UPDATE_CHECK_STATUSES;
+    // The wins and overview views also surface unassigned cards (grouped as
+    // "Unassigned"); every other consumer keeps the no-unassigned policy.
+    const pool = SET_STATUSES[set] ? [...(allCards || []), ...(unassignedCards || [])] : allCards || [];
     const cards = pool.filter((c) => statuses.includes(c.status));
     res.status(200).json({ generatedAt, count: cards.length, cards });
   } catch (err) {
