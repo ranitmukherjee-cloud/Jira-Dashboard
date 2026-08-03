@@ -3626,6 +3626,20 @@ function switchTab(dir) {
 document.getElementById('prevTabBtn').addEventListener('click', () => switchTab(-1));
 document.getElementById('nextTabBtn').addEventListener('click', () => switchTab(1));
 
+// Keyboard tab switching: "<" previous, ">" next (one tab per press). The
+// unshifted "," / "." on the same physical keys work too, so it doesn't matter
+// whether Shift is held. Ignored while typing — the dashboard is full of text
+// fields (task names, remarks, search) and typing "<" there must stay literal.
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return; // leave browser shortcuts alone
+  const el = e.target;
+  const tag = el && el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
+  if (document.getElementById('modalOverlay').classList.contains('open')) return;
+  if (e.key === '<' || e.key === ',') { e.preventDefault(); switchTab(-1); }
+  else if (e.key === '>' || e.key === '.') { e.preventDefault(); switchTab(1); }
+});
+
 // Global search — present on every tab (outside #app/#sidebar so it survives
 // every re-render), jumps straight to a filtered list of matching deals/cards.
 document.getElementById('globalSearchForm').addEventListener('submit', (e) => {
