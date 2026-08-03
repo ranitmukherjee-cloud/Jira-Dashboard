@@ -76,8 +76,21 @@ const POLL_MS = 60 * 1000;
 // a whole page of tables on every refresh — much heavier than the other tabs —
 // so they run on their own slower cadence instead of riding the main 60s poll.
 // Manual "Refresh now" still updates them immediately regardless of this timer.
-const SLOW_POLL_MS = 3 * 60 * 1000;
-const SLOW_POLL_ROUTES = { update: () => renderUpdateCheck(), team: () => renderTeam(), overview: () => renderOverview() };
+// Per-route auto-refresh intervals. Overview is the heaviest read (one big
+// pull feeding four segments) and is a standing exec view rather than
+// something people edit, so it refreshes far less often.
+const SLOW_POLL_ROUTES = {
+  update: { ms: 3 * 60 * 1000, run: () => renderUpdateCheck() },
+  team: { ms: 3 * 60 * 1000, run: () => renderTeam() },
+  overview: { ms: 15 * 60 * 1000, run: () => renderOverview() },
+};
+const SLOW_POLL_TICK_MS = 30 * 1000; // how often we check whether one is due
+const slowPollLastRun = {};
+// Restart a tab's clock — on landing there, and on a manual refresh — so the
+// interval always counts from the last time the user actually saw fresh data.
+function markSlowPollFresh(routeName) {
+  if (SLOW_POLL_ROUTES[routeName]) slowPollLastRun[routeName] = Date.now();
+}
 
 // ---------- data ----------
 async function loadData() {
@@ -182,6 +195,7 @@ function navigate(hash) {
 
 window.addEventListener('hashchange', () => {
   STATE.route = parseRoute();
+  markSlowPollFresh(STATE.route.name); // landing on a tab restarts its refresh clock
   render();
 });
 
@@ -3890,6 +3904,7 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
   try {
     await fetch('/api/refresh', { method: 'POST' });
     await loadData();
+    markSlowPollFresh(STATE.route.name); // manual refresh restarts the clock
     render();
   } finally {
     btn.textContent = 'Refresh now';
@@ -3924,8 +3939,15 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
     }
   }, POLL_MS);
 
+  markSlowPollFresh(STATE.route.name); // start the clock for the landing tab
   setInterval(() => {
-    const refresh = SLOW_POLL_ROUTES[STATE.route.name];
-    if (refresh) refresh();
-  }, SLOW_POLL_MS);
+    const name = STATE.route.name;
+    const cfg = SLOW_POLL_ROUTES[name];
+    if (!cfg) return;
+    const last = slowPollLastRun[name];
+    if (last == null) { slowPollLastRun[name] = Date.now(); return; }
+    if (Date.now() - last < cfg.ms) return;
+    slowPollLastRun[name] = Date.now();
+    cfg.run();
+  }, SLOW_POLL_TICK_MS);
 })();
