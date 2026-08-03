@@ -706,7 +706,7 @@ function renderOverviewView() {
         </div>
       </div>
 
-      <div class="sh"><div class="sht">CEO Scorecard — Active Pipeline vs Won ${OV_FY}</div><div class="shl"></div><div class="shb">Per PSE · win rate = won ÷ (won + churn)</div></div>
+      <div class="sh"><div class="sht">Active vs Won ${OV_FY}</div><div class="shl"></div><div class="shb">Per PSE · win rate = won ÷ (won + churn)</div></div>
       <div class="tc">
         <div class="tw">
           <table class="ov-score">
