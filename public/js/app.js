@@ -40,6 +40,7 @@ const STATE = {
   overviewCards: [],
   ovFilters: { pse: new Set(), kam: new Set(), salesRep: new Set(), quarter: 'All' },
   ovSegment: 'all', // which segment the detail table shows
+  ovDetailPse: 'All', // PSE filter local to the Deal Detail table only
   winCards: [],
   winFilters: { pse: new Set(), status: new Set() },
   winStatFilter: { fy: 'All', q: 'All' }, // scoreboard toggles
@@ -663,9 +664,17 @@ function renderOverviewView() {
   const maxBar = Math.max(1, ...rows.map((r) => Math.max(r.a.length, r.w.length)));
 
   const detailSeg = STATE.ovSegment;
-  const detailList = (detailSeg === 'all' ? inScope : seg[detailSeg] || []).slice()
+  const detailSegList = detailSeg === 'all' ? inScope : seg[detailSeg] || [];
+  // Local-only PSE narrowing for this table — deliberately separate from the
+  // header's PSE chips (STATE.ovFilters.pse), so picking a PSE here doesn't
+  // move the scorecard/hero numbers above; it only narrows this table.
+  const detailPsePool = [...new Set(detailSegList.map(winPse))].sort();
+  if (STATE.ovDetailPse !== 'All' && !detailPsePool.includes(STATE.ovDetailPse)) STATE.ovDetailPse = 'All';
+  const detailList = detailSegList
+    .filter((c) => STATE.ovDetailPse === 'All' || winPse(c) === STATE.ovDetailPse)
+    .slice()
     .sort((x, y) => (y.mrr || 0) - (x.mrr || 0));
-  const detailLabel = detailSeg === 'all' ? 'All Deals' : OV_SEG_BY_KEY[detailSeg].label;
+  const detailLabel = (detailSeg === 'all' ? 'All Deals' : OV_SEG_BY_KEY[detailSeg].label) + (STATE.ovDetailPse !== 'All' ? ` — ${STATE.ovDetailPse}` : '');
 
   const f = STATE.ovFilters;
   const pseChips = [...new Set((STATE.overviewCards || []).map(winPse))].sort();
@@ -752,8 +761,14 @@ function renderOverviewView() {
         ${OV_SEGMENTS.map((s) => `<button class="win-chip ${detailSeg === s.key ? 'active' : ''}" data-ov-seg2="${s.key}">${s.short} <span class="win-chip-n">${seg[s.key].length}</span></button>`).join('')}
       </div>
       <div class="tc">
-        <div class="th"><span class="tht">${detailLabel}</span><span class="ths">${detailList.length} deal(s) · ${fmtUsd(mrrOf(detailList))} MRR</span>
-          ${detailList.length ? '<button class="clear-btn" id="ovExportBtn" style="margin-left:auto">Export CSV</button>' : ''}</div>
+        <div class="th ov-detail-head">
+          <div class="ov-detail-title"><span class="tht">${detailLabel}</span><span class="ths">${detailList.length} deal(s) · ${fmtUsd(mrrOf(detailList))} MRR</span></div>
+          <div class="ov-detail-pse-chips">
+            <button class="win-chip win-chip-sm ${STATE.ovDetailPse === 'All' ? 'active' : ''}" data-ov-detail-pse="All">All PSEs</button>
+            ${detailPsePool.map((p) => `<button class="win-chip win-chip-sm ${STATE.ovDetailPse === p ? 'active' : ''}" data-ov-detail-pse="${escapeAttr(p)}">${p}</button>`).join('')}
+          </div>
+          ${detailList.length ? '<button class="clear-btn" id="ovExportBtn">Export CSV</button>' : ''}
+        </div>
         <div class="tw">
           <table class="win-table">
             <thead><tr><th>Key</th><th style="width:20%">Client</th><th>Status</th><th>PSE</th><th>KAM</th><th>Sales Rep</th><th>MRR</th><th>ARR</th><th>Sol. Start</th><th>Exp. Closure</th><th>Commercial Sign-Off</th></tr></thead>
@@ -778,6 +793,8 @@ function renderOverviewView() {
     el.addEventListener('click', () => { STATE.ovSegment = el.dataset.ovSeg; renderOverviewView(); }));
   document.querySelectorAll('[data-ov-seg2]').forEach((b) =>
     b.addEventListener('click', () => { STATE.ovSegment = b.dataset.ovSeg2; renderOverviewView(); }));
+  document.querySelectorAll('[data-ov-detail-pse]').forEach((b) =>
+    b.addEventListener('click', () => { STATE.ovDetailPse = b.dataset.ovDetailPse; renderOverviewView(); }));
   document.querySelectorAll('.win-table tbody tr[data-key]').forEach((tr) =>
     tr.addEventListener('click', (e) => {
       if (e.target.closest('.jira-key-link')) return;

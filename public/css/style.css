@@ -628,3 +628,9 @@ tr.row-early:hover td{background:#D6F5E3 !important;}
 .ov-client{font-weight:700;color:var(--n);}
 .ov-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:middle;}
 .ov-badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:800;white-space:nowrap;color:var(--ovc);background:color-mix(in srgb,var(--ovc) 12%,transparent);border:1px solid color-mix(in srgb,var(--ovc) 30%,transparent);}
+
+/* Deal Detail table header: title + local PSE chips + export, all in one row */
+.ov-detail-head{flex-wrap:wrap;gap:10px;align-items:center;}
+.ov-detail-title{display:flex;flex-direction:column;margin-right:auto;}
+.ov-detail-pse-chips{display:flex;gap:5px;flex-wrap:wrap;align-items:center;}
+.win-chip-sm{padding:3px 10px;font-size:10.5px;}
