@@ -2210,6 +2210,10 @@ function taskStart(task) {
 }
 function taskVisibleOnDay(task, day) {
   const start = taskStart(task);
+  // Always visible on the day it was actually planned/added — even for a
+  // future-dated task whose Start Date hasn't arrived yet, so a PSE can see
+  // "Planned On" alongside Start/Due right when they create it.
+  if (day === task.createdDate) return true;
   if (start > day) return false;
   if (task.status === 'Done') {
     // Exactly 2 fixed pages once Done: the Task Start Date, and the Due Date
@@ -2310,6 +2314,7 @@ function trackerRow(t, day, { hideFlagCol = false } = {}) {
   return `
     <tr data-id="${t.id}" class="${rowCls}">
       <td class="tk-cell tk-cell-name"><textarea class="tk-input tk-textarea" data-field="dealName" rows="1" placeholder="Task name…">${escapeHtml(t.dealName || '')}</textarea></td>
+      <td class="tk-cell tk-cell-date tk-cell-planned" title="Planned On — the day this task was actually added, fixed forever">${t.createdDate ? new Date(t.createdDate + 'T00:00:00').toLocaleDateString('en-GB') : '—'}</td>
       <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" lang="en-GB" data-field="taskStartDate" value="${taskStart(t) || ''}" title="Task Start Date — the task appears from this day onward; change it to move the task to another day"/></td>
       <td class="tk-cell">
         <select class="tk-select tk-select-status ${statusCls}" data-field="status">
@@ -2595,8 +2600,8 @@ function renderTrackerView() {
           ? '<div class="tw"><div class="empty">Marked on leave for this working day</div></div>'
           : `<div class="tw">
         <table class="tk-table">
-          <thead><tr><th style="width:26%">Task Name</th><th title="The task appears from this day onward; change it to move the task to another day's page">Task Start Date</th><th>Status</th><th>Due Date</th>${isApoorv ? '' : '<th>Flag Apoorv</th>'}<th>Help in SOW</th><th style="width:16%">Blocker</th><th style="width:16%">Remarks</th><th></th></tr></thead>
-          <tbody>${rows.map((t) => trackerRow(t, day, { hideFlagCol: isApoorv })).join('') || `<tr><td colspan="${isApoorv ? 8 : 9}" class="empty">No tasks</td></tr>`}</tbody>
+          <thead><tr><th style="width:24%">Task Name</th><th title="The day this task was actually added — fixed forever, never changes">Planned On</th><th title="The task appears from this day onward; change it to move the task to another day's page">Task Start Date</th><th>Status</th><th>Due Date</th>${isApoorv ? '' : '<th>Flag Apoorv</th>'}<th>Help in SOW</th><th style="width:15%">Blocker</th><th style="width:15%">Remarks</th><th></th></tr></thead>
+          <tbody>${rows.map((t) => trackerRow(t, day, { hideFlagCol: isApoorv })).join('') || `<tr><td colspan="${isApoorv ? 9 : 10}" class="empty">No tasks</td></tr>`}</tbody>
         </table>
       </div>
       <div style="padding:10px 16px"><button class="tk-add" data-add-pse="${pse}">+ Add Task</button></div>`
