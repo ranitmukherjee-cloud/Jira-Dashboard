@@ -2210,11 +2210,12 @@ function taskStart(task) {
 }
 function taskVisibleOnDay(task, day) {
   const start = taskStart(task);
-  // Always visible on the day it was actually planned/added — even for a
-  // future-dated task whose Start Date hasn't arrived yet, so a PSE can see
-  // "Planned On" alongside Start/Due right when they create it.
-  if (day === task.createdDate) return true;
-  if (start > day) return false;
+  const planned = task.createdDate || start;
+  // Carry forward from the EARLIER of Planned On / Start Date, so a
+  // future-dated task stays on every day's sheet from the day it was planned
+  // (no invisible gap before its Start Date arrives) until it's marked Done.
+  const first = planned < start ? planned : start;
+  if (day < first) return false;
   if (task.status === 'Done') {
     // Exactly 2 fixed pages once Done: the Task Start Date, and the Due Date
     // (which doubles as the "marked done" record regardless of which day it
