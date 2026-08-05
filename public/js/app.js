@@ -31,22 +31,24 @@ const STATE = {
   options: { pse: [], status: [], modules: [], kam: [], salesRep: [], requestCategory: [] },
   tabFilters: {},
   activityFilters: { pse: new Set(), status: new Set(), dealName: '', dateFrom: '', dateTo: '' },
-  trackerFilters: { pse: new Set(), status: new Set(), helpInSow: '', flagApoorv: '', dateFrom: '', dateTo: '' },
+  trackerFilters: { pse: new Set(), status: new Set(), helpInSow: '', flagApoorv: '', dateFrom: '', dateTo: '', dealName: '' },
   trackerLeave: {},
   trackerHolidays: {},
-  tatFilters: { pse: new Set(), status: new Set(), health: new Set(), kam: new Set(), salesRep: new Set(), dealSize: '' },
+  tatFilters: { pse: new Set(), status: new Set(), health: new Set(), kam: new Set(), salesRep: new Set(), dealSize: '', search: '' },
   tatBox: 'all',
   tatSort: {}, // per-table sort state: { fy2627:{key,dir}, fy2526:{...}, poc:{...} }
   overviewCards: [],
-  ovFilters: { pse: new Set(), kam: new Set(), salesRep: new Set(), quarter: 'All' },
+  ovFilters: { pse: new Set(), kam: new Set(), salesRep: new Set(), quarter: 'All', search: '' },
   ovSegment: 'all', // which segment the detail table shows
   ovDetailPse: 'All', // PSE filter local to the Deal Detail table only
+  ovDetailSort: { key: 'mrr', dir: 'desc' }, // Deal Detail table's own column sort
   winCards: [],
-  winFilters: { pse: new Set(), status: new Set() },
+  winFilters: { pse: new Set(), status: new Set(), search: '' },
   winStatFilter: { fy: 'All', q: 'All' }, // scoreboard toggles
   winTableQuarter: {}, // per-FY-table quarter chip, e.g. { 'FY 26-27': 'Q1' }
   updateCards: [],
-  updateFilters: { pse: new Set(), status: new Set(), kam: new Set(), salesRep: new Set(), requestCategory: new Set(), completeness: 'all', sections: new Set(), missingField: '' },
+  updateFilters: { pse: new Set(), status: new Set(), kam: new Set(), salesRep: new Set(), requestCategory: new Set(), completeness: 'all', sections: new Set(), missingField: '', search: '' },
+  quickLinksSearch: '', // free-text filter, scoped to the Quick Links tab only
   updateCollapsed: new Set(), // PSE panels collapsed on the Jira Update Check tab
   ucSectionCollapsed: new Set(), // section columns (discovery/solutioning/details) collapsed
   ucStatsCollapsed: false, // the top stat-boxes section on Jira Update Check
@@ -130,7 +132,7 @@ function updateHeader(data) {
     return;
   }
   const dt = new Date(data.generatedAt);
-  el.textContent = `${data.count} cards · refreshed ${dt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`;
+  el.textContent = `${data.count} cards · refreshed ${fmtDdMmYyyyTime(dt)} IST`;
   const ageMin = (Date.now() - dt.getTime()) / 60000;
   if (ageMin > 20) {
     live.classList.add('stale');
@@ -194,9 +196,29 @@ function navigate(hash) {
   location.hash = hash;
 }
 
+// The search box's value depends on which tab is active — like the other
+// per-tab filters, each tab's search term persists in its own bucket, so
+// switching tabs should show that tab's own term rather than the one just typed.
+function currentTabSearchValue() {
+  const route = STATE.route.name;
+  if (SIDEBAR_SEARCH_ROUTES.includes(route)) return STATE.filters.search;
+  if (route === 'overview' || ['status', 'segment', 'list'].includes(route)) return STATE.ovFilters.search;
+  if (route === 'team') return STATE.winFilters.search;
+  if (route === 'tat') return STATE.tatFilters.search;
+  if (route === 'update') return STATE.updateFilters.search;
+  if (route === 'tracker') return STATE.trackerFilters.dealName;
+  if (route === 'links') return STATE.quickLinksSearch;
+  if (route === 'activity') return STATE.activityFilters.dealName;
+  return '';
+}
+
 window.addEventListener('hashchange', () => {
   STATE.route = parseRoute();
   markSlowPollFresh(STATE.route.name); // landing on a tab restarts its refresh clock
+  const searchBox = document.getElementById('globalSearchInput');
+  if (searchBox) searchBox.value = currentTabSearchValue();
+  const hint = document.getElementById('globalSearchHint');
+  if (hint) hint.classList.remove('show');
   render();
 });
 
@@ -296,6 +318,30 @@ function daysUntil(dateStr) {
 function fmtUsd(n) {
   if (n == null) return '—';
   return '$' + Math.round(n).toLocaleString('en-US');
+}
+
+// Every plain date column across every tab renders through this — explicit
+// 2-digit day/month + numeric year guarantees DD/MM/YYYY everywhere,
+// regardless of the browser/OS locale (which a bare toLocaleDateString call
+// would otherwise be at the mercy of). Accepts a bare "YYYY-MM-DD" string, a
+// full ISO timestamp, or a Date.
+function fmtDdMmYyyy(d) {
+  if (!d) return null;
+  const date = d instanceof Date ? d : new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? d + 'T00:00:00' : d);
+  if (isNaN(date.getTime())) return null;
+  return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+// Same DD/MM/YYYY date part, plus a time-of-day — for timestamp fields
+// (Created, Last Updated, activity log entries) that need the clock time
+// alongside the date, still in the IST timezone the team works in.
+function fmtDdMmYyyyTime(d) {
+  if (!d) return null;
+  const date = d instanceof Date ? d : new Date(d);
+  if (isNaN(date.getTime())) return null;
+  const datePart = date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Kolkata' });
+  const timePart = date.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+  return `${datePart}, ${timePart}`;
 }
 
 function isMrrMissing(mrr) {
@@ -585,6 +631,7 @@ function ovSegmentOf(c) {
 
 function applyOvFilters(cards) {
   const f = STATE.ovFilters;
+  const search = f.search.trim().toLowerCase();
   return cards.filter((c) => {
     if (f.pse.size && !f.pse.has(winPse(c))) return false;
     if (f.kam.size && !f.kam.has(c.kam || '—')) return false;
@@ -592,6 +639,10 @@ function applyOvFilters(cards) {
     if (f.quarter !== 'All') {
       const d = c.commercialSignOffDate;
       if (!d || quarterOf(d) !== f.quarter) return false;
+    }
+    if (search) {
+      const hay = `${c.key} ${c.summary || ''} ${winPse(c)} ${c.kam || ''} ${c.salesRep || ''}`.toLowerCase();
+      if (!hay.includes(search)) return false;
     }
     return true;
   });
@@ -610,29 +661,48 @@ async function renderOverview() {
   renderOverviewView();
 }
 
-function ovDealRow(c, seg) {
-  const arr = c.mrr ? c.mrr * 12 : null;
-  const meta = OV_SEG_BY_KEY[seg];
-  const dot = meta ? `<span class="ov-dot" style="background:${meta.color}"></span>` : '';
-  // Colour the status by segment rather than Jira's statusCategory — won and
-  // churn cards aren't in STATE.data.issues, so fbadge() would grey them out.
-  const badge = meta
+// Colour the status by segment rather than Jira's statusCategory — won and
+// churn cards aren't in STATE.data.issues, so fbadge() would grey them out.
+function ovStatusBadge(c) {
+  const meta = OV_SEG_BY_KEY[ovSegmentOf(c)];
+  return meta
     ? `<span class="ov-badge" style="--ovc:${meta.color}">${wonLabel(c.status)}</span>`
     : `<span class="bd bgy">${wonLabel(c.status)}</span>`;
-  return `
-    <tr data-key="${c.key}">
-      <td><a class="jira-key-link" href="${c.url}" target="_blank" rel="noopener" title="Open ${c.key} in Jira">${c.key} ↗</a></td>
-      <td class="ov-client">${dot}${c.summary || '—'}</td>
-      <td>${badge}</td>
-      <td>${winPse(c)}</td>
-      <td>${c.kam || '<span class="tat-blank">—</span>'}</td>
-      <td>${c.salesRep || '<span class="tat-blank">—</span>'}</td>
-      <td class="win-num">${c.mrr ? fmtUsd(c.mrr) : '<span class="tat-blank">—</span>'}</td>
-      <td class="win-num">${arr ? fmtUsd(arr) : '<span class="tat-blank">—</span>'}</td>
-      <td>${c.solutioningStartDate ? new Date(c.solutioningStartDate + 'T00:00:00').toLocaleDateString('en-GB') : '<span class="tat-blank">—</span>'}</td>
-      <td>${c.expectedSalesClosure ? new Date(c.expectedSalesClosure + 'T00:00:00').toLocaleDateString('en-GB') : '<span class="tat-blank">—</span>'}</td>
-      <td>${c.commercialSignOffDate ? new Date(c.commercialSignOffDate + 'T00:00:00').toLocaleDateString('en-GB') : '<span class="tat-blank">—</span>'}</td>
-    </tr>`;
+}
+
+// Column model for the Deal Detail table — sortable per-column, exactly like
+// the TAT tab's tables (same sort state shape, same click-a-header behavior),
+// but scoped to this one Overview table only (STATE.ovDetailSort).
+const OV_DETAIL_COLUMNS = [
+  { key: 'key', label: 'Key', type: 'text', val: (c) => c.key, cell: (c) => `<a class="jira-key-link" href="${c.url}" target="_blank" rel="noopener" title="Open ${c.key} in Jira">${c.key} ↗</a>` },
+  { key: 'summary', label: 'Client', type: 'text', val: (c) => c.summary || '', cell: (c) => { const meta = OV_SEG_BY_KEY[ovSegmentOf(c)]; const dot = meta ? `<span class="ov-dot" style="background:${meta.color}"></span>` : ''; return `${dot}${c.summary || '—'}`; } },
+  { key: 'status', label: 'Status', type: 'text', val: (c) => c.status || '', cell: (c) => ovStatusBadge(c) },
+  { key: 'pse', label: 'PSE', type: 'text', val: (c) => winPse(c), cell: (c) => winPse(c) },
+  { key: 'kam', label: 'KAM', type: 'text', val: (c) => c.kam || '', cell: (c) => c.kam || '<span class="tat-blank">—</span>' },
+  { key: 'salesRep', label: 'Sales Rep', type: 'text', val: (c) => c.salesRep || '', cell: (c) => c.salesRep || '<span class="tat-blank">—</span>' },
+  { key: 'mrr', label: 'MRR', type: 'num', val: (c) => c.mrr || 0, cell: (c) => (c.mrr ? fmtUsd(c.mrr) : '<span class="tat-blank">—</span>') },
+  { key: 'arr', label: 'ARR', type: 'num', val: (c) => (c.mrr ? c.mrr * 12 : 0), cell: (c) => (c.mrr ? fmtUsd(c.mrr * 12) : '<span class="tat-blank">—</span>') },
+  { key: 'solutioningStartDate', label: 'Sol. Start', type: 'date', val: (c) => c.solutioningStartDate || '', cell: (c) => fmtDdMmYyyy(c.solutioningStartDate) || '<span class="tat-blank">—</span>' },
+  { key: 'expectedSalesClosure', label: 'Exp. Closure', type: 'date', val: (c) => c.expectedSalesClosure || '', cell: (c) => fmtDdMmYyyy(c.expectedSalesClosure) || '<span class="tat-blank">—</span>' },
+  { key: 'commercialSignOffDate', label: 'Commercial Sign-Off', type: 'date', val: (c) => c.commercialSignOffDate || '', cell: (c) => fmtDdMmYyyy(c.commercialSignOffDate) || '<span class="tat-blank">—</span>' },
+];
+
+function sortOvDetailRows(rows) {
+  const s = STATE.ovDetailSort;
+  const col = OV_DETAIL_COLUMNS.find((c) => c.key === s.key) || OV_DETAIL_COLUMNS[0];
+  const dir = s.dir === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const va = col.val(a), vb = col.val(b);
+    if (col.type === 'num') return (va - vb) * dir;
+    const sa = String(va), sb = String(vb);
+    if (!sa && sb) return 1; // blanks always sort last
+    if (sa && !sb) return -1;
+    return sa.localeCompare(sb) * dir;
+  });
+}
+
+function ovDealRow(c) {
+  return `<tr data-key="${c.key}">${OV_DETAIL_COLUMNS.map((col) => `<td${col.type === 'num' ? ' class="win-num"' : col.key === 'summary' ? ' class="ov-client"' : ''}>${col.cell(c)}</td>`).join('')}</tr>`;
 }
 
 function renderOverviewView() {
@@ -652,15 +722,13 @@ function renderOverviewView() {
     const w = seg.won.filter((c) => winPse(c) === p);
     const k = seg.c3m.filter((c) => winPse(c) === p);
     const ch = seg.churn.filter((c) => winPse(c) === p);
-    const decided = w.length + ch.length;
-    return { p, a, w, k, ch, aMrr: mrrOf(a), wMrr: mrrOf(w), winRate: decided ? Math.round((w.length / decided) * 100) : null };
+    return { p, a, w, k, ch, aMrr: mrrOf(a), wMrr: mrrOf(w) };
   }).sort((x, y) => y.wMrr - x.wMrr || y.aMrr - x.aMrr);
 
   const tot = {
     a: seg.active.length, w: seg.won.length, k: seg.c3m.length, ch: seg.churn.length,
     aMrr: mrrOf(seg.active), wMrr: mrrOf(seg.won),
   };
-  tot.winRate = tot.w + tot.ch ? Math.round((tot.w / (tot.w + tot.ch)) * 100) : null;
   const maxBar = Math.max(1, ...rows.map((r) => Math.max(r.a.length, r.w.length)));
 
   const detailSeg = STATE.ovSegment;
@@ -670,10 +738,9 @@ function renderOverviewView() {
   // move the scorecard/hero numbers above; it only narrows this table.
   const detailPsePool = [...new Set(detailSegList.map(winPse))].sort();
   if (STATE.ovDetailPse !== 'All' && !detailPsePool.includes(STATE.ovDetailPse)) STATE.ovDetailPse = 'All';
-  const detailList = detailSegList
-    .filter((c) => STATE.ovDetailPse === 'All' || winPse(c) === STATE.ovDetailPse)
-    .slice()
-    .sort((x, y) => (y.mrr || 0) - (x.mrr || 0));
+  const detailList = sortOvDetailRows(
+    detailSegList.filter((c) => STATE.ovDetailPse === 'All' || winPse(c) === STATE.ovDetailPse)
+  );
   const detailLabel = (detailSeg === 'all' ? 'All Deals' : OV_SEG_BY_KEY[detailSeg].label) + (STATE.ovDetailPse !== 'All' ? ` — ${STATE.ovDetailPse}` : '');
 
   const f = STATE.ovFilters;
@@ -715,7 +782,7 @@ function renderOverviewView() {
         </div>
       </div>
 
-      <div class="sh"><div class="sht">Active vs Won ${OV_FY}</div><div class="shl"></div><div class="shb">Per PSE · win rate = won ÷ (won + churn)</div></div>
+      <div class="sh"><div class="sht">Active vs Won ${OV_FY}</div><div class="shl"></div><div class="shb">Per PSE</div></div>
       <div class="tc">
         <div class="tw">
           <table class="ov-score">
@@ -723,7 +790,7 @@ function renderOverviewView() {
               <th>PSE</th><th class="ov-cmp-th">Active vs Won</th>
               <th class="win-num">Active</th><th class="win-num">Active MRR</th>
               <th class="win-num">Won</th><th class="win-num">Won MRR</th>
-              <th class="win-num">Win Rate</th><th class="win-num">Check-in 3M</th><th class="win-num">Churn</th>
+              <th class="win-num">Check-in 3M</th><th class="win-num">Churn</th>
             </tr></thead>
             <tbody>
               ${rows.map((r) => `
@@ -737,16 +804,14 @@ function renderOverviewView() {
                   <td class="win-num">${fmtUsd(r.aMrr)}</td>
                   <td class="win-num ov-g">${r.w.length}</td>
                   <td class="win-num">${fmtUsd(r.wMrr)}</td>
-                  <td class="win-num">${r.winRate == null ? '<span class="tat-blank">—</span>' : `<span class="rate-pill ${r.winRate >= 60 ? 'rate-good' : r.winRate >= 30 ? 'rate-mid' : 'rate-bad'}">${r.winRate}%</span>`}</td>
                   <td class="win-num ov-a">${r.k.length}</td>
                   <td class="win-num ov-r">${r.ch.length}</td>
-                </tr>`).join('') || '<tr><td colspan="9" class="empty">No deals match the current filters</td></tr>'}
+                </tr>`).join('') || '<tr><td colspan="8" class="empty">No deals match the current filters</td></tr>'}
             </tbody>
             <tfoot><tr class="win-foot">
               <td>TOTAL</td><td></td>
               <td class="win-num">${tot.a}</td><td class="win-num">${fmtUsd(tot.aMrr)}</td>
               <td class="win-num">${tot.w}</td><td class="win-num">${fmtUsd(tot.wMrr)}</td>
-              <td class="win-num">${tot.winRate == null ? '—' : tot.winRate + '%'}</td>
               <td class="win-num">${tot.k}</td><td class="win-num">${tot.ch}</td>
             </tr></tfoot>
           </table>
@@ -770,9 +835,13 @@ function renderOverviewView() {
           ${detailList.length ? '<button class="clear-btn" id="ovExportBtn">Export CSV</button>' : ''}
         </div>
         <div class="tw">
-          <table class="win-table">
-            <thead><tr><th>Key</th><th style="width:20%">Client</th><th>Status</th><th>PSE</th><th>KAM</th><th>Sales Rep</th><th>MRR</th><th>ARR</th><th>Sol. Start</th><th>Exp. Closure</th><th>Commercial Sign-Off</th></tr></thead>
-            <tbody>${detailList.map((c) => ovDealRow(c, ovSegmentOf(c))).join('') || '<tr><td colspan="11" class="empty">No deals in this view</td></tr>'}</tbody>
+          <table class="tat-table ov-detail-table">
+            <thead><tr>${OV_DETAIL_COLUMNS.map((c) => {
+              const active = STATE.ovDetailSort.key === c.key;
+              const arrow = active ? (STATE.ovDetailSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+              return `<th class="tat-th ${active ? 'sorted' : ''}" data-ov-sort-key="${c.key}" title="Sort by ${c.label}">${c.label}${arrow}</th>`;
+            }).join('')}</tr></thead>
+            <tbody>${detailList.map((c) => ovDealRow(c)).join('') || `<tr><td colspan="${OV_DETAIL_COLUMNS.length}" class="empty">No deals in this view</td></tr>`}</tbody>
           </table>
         </div>
       </div>
@@ -795,7 +864,20 @@ function renderOverviewView() {
     b.addEventListener('click', () => { STATE.ovSegment = b.dataset.ovSeg2; renderOverviewView(); }));
   document.querySelectorAll('[data-ov-detail-pse]').forEach((b) =>
     b.addEventListener('click', () => { STATE.ovDetailPse = b.dataset.ovDetailPse; renderOverviewView(); }));
-  document.querySelectorAll('.win-table tbody tr[data-key]').forEach((tr) =>
+  // Deal Detail column sort — same click-a-header-to-sort behavior as the TAT
+  // tab; scoped to this one table only via STATE.ovDetailSort.
+  document.querySelectorAll('.ov-detail-table .tat-th').forEach((th) =>
+    th.addEventListener('click', () => {
+      const key = th.dataset.ovSortKey;
+      const cur = STATE.ovDetailSort;
+      const numeric = OV_DETAIL_COLUMNS.find((c) => c.key === key).type !== 'text';
+      let dir;
+      if (cur.key === key) dir = cur.dir === 'asc' ? 'desc' : 'asc';
+      else dir = numeric ? 'desc' : 'asc';
+      STATE.ovDetailSort = { key, dir };
+      renderOverviewView();
+    }));
+  document.querySelectorAll('.ov-detail-table tbody tr[data-key]').forEach((tr) =>
     tr.addEventListener('click', (e) => {
       if (e.target.closest('.jira-key-link')) return;
       openWinDetail(tr.dataset.key, STATE.overviewCards);
@@ -838,7 +920,7 @@ function renderOverviewSidebar() {
   const cards = STATE.overviewCards || [];
   const kams = distinct(cards.map((c) => c.kam || '—'));
   const reps = distinct(cards.map((c) => c.salesRep || '—'));
-  const activeCount = f.kam.size + f.salesRep.size + f.pse.size + (f.quarter !== 'All' ? 1 : 0);
+  const activeCount = f.kam.size + f.salesRep.size + f.pse.size + (f.quarter !== 'All' ? 1 : 0) + (f.search.trim() ? 1 : 0);
   const sb = document.getElementById('sidebar');
   sb.style.display = '';
   sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
@@ -915,7 +997,7 @@ function renderStatusDrilldown(status) {
                   <td>${i.priority || '—'}</td>
                   <td>${modulePills(i.modules)}</td>
                   <td>${tatLabel(i)}</td>
-                  <td>${new Date(i.updated).toLocaleDateString('en-IN')}</td>
+                  <td>${fmtDdMmYyyy(i.updated)}</td>
                 </tr>`
                   )
                   .join('') || '<tr><td colspan="9" class="empty">No cards match the current filters</td></tr>'
@@ -1012,7 +1094,7 @@ function renderGenericDealTable({ title, subtitle, rows, backTo, csvName }) {
                   <td>${i.kam || '—'}</td>
                   <td>${fmtUsd(i.mrr)}</td>
                   <td>${tatLabel(i)}</td>
-                  <td>${new Date(i.updated).toLocaleDateString('en-IN')}</td>
+                  <td>${fmtDdMmYyyy(i.updated)}</td>
                 </tr>`
                   )
                   .join('') || '<tr><td colspan="8" class="empty">No cards match</td></tr>'
@@ -1066,8 +1148,8 @@ function renderPipeline() {
       <td>${fmtUsd(i.mrr)}</td>
       <td>${fmtUsd(i.arr)}</td>
       <td>${dealSizeBadge(i.dealSize)}</td>
-      <td>${i.solutioningStartDate ? new Date(i.solutioningStartDate).toLocaleDateString('en-IN') : '—'}</td>
-      <td>${i.expectedSalesClosure ? new Date(i.expectedSalesClosure).toLocaleDateString('en-GB') : '<span style="color:var(--t3)">—</span>'}</td>
+      <td>${fmtDdMmYyyy(i.solutioningStartDate) || '—'}</td>
+      <td>${fmtDdMmYyyy(i.expectedSalesClosure) || '<span style="color:var(--t3)">—</span>'}</td>
       <td>${i.isPreQuarterHoldover ? '<span class="flag-badge">🔴 Red Flag</span>' : '—'}</td>
       <td>${jiraLinkCell(i)}</td>
     </tr>`;
@@ -1142,7 +1224,7 @@ function renderC3m() {
       <td>${i.kam || '—'}</td>
       <td>${i.salesRep || '—'}</td>
       <td>${fmtUsd(i.mrr)}</td>
-      <td>${new Date(i.updated).toLocaleDateString('en-IN')}</td>
+      <td>${fmtDdMmYyyy(i.updated)}</td>
       <td>${jiraLinkCell(i)}</td>
     </tr>`;
 
@@ -1196,7 +1278,7 @@ function renderMrr() {
       <td>${fbadge(i.status)}</td>
       <td>${fmtUsd(i.mrr)}</td>
       <td>${fmtUsd(i.arr)}</td>
-      <td>${i.expectedSalesClosure ? new Date(i.expectedSalesClosure).toLocaleDateString('en-GB') : '<span style="color:var(--t3)">—</span>'}</td>
+      <td>${fmtDdMmYyyy(i.expectedSalesClosure) || '<span style="color:var(--t3)">—</span>'}</td>
       <td>${jiraLinkCell(i)}</td>
     </tr>`;
 
@@ -1244,8 +1326,8 @@ function renderMrr() {
                       <td>${i.summary || ''}</td>
                       <td>${fbadge(i.status)}</td>
                       <td>${i.mrr === null ? '<span class="bd bgy">blank</span>' : `<span class="bd ba">${i.mrr}</span>`}</td>
-                      <td>${i.expectedSalesClosure ? new Date(i.expectedSalesClosure).toLocaleDateString('en-GB') : '<span style="color:var(--t3)">—</span>'}</td>
-                      <td>${new Date(i.updated).toLocaleDateString('en-IN')}</td>
+                      <td>${fmtDdMmYyyy(i.expectedSalesClosure) || '<span style="color:var(--t3)">—</span>'}</td>
+                      <td>${fmtDdMmYyyy(i.updated)}</td>
                     </tr>`
                     )
                     .join('')}
@@ -1316,7 +1398,7 @@ function renderClosingSoon() {
                   <td>${i.assignee}</td>
                   <td>${i.kam || '—'}</td>
                   <td>${fmtUsd(i.mrr)}</td>
-                  <td>${new Date(i.expectedSalesClosure).toLocaleDateString('en-IN')}</td>
+                  <td>${fmtDdMmYyyy(i.expectedSalesClosure)}</td>
                   <td><span class="bd ${i.daysUntil <= 7 ? 'br' : i.daysUntil <= 15 ? 'ba' : 'bb'}">${i.daysUntil}d</span></td>
                 </tr>`
                   )
@@ -1351,6 +1433,7 @@ const TAT_FY_STATUSES = ['Req. Gathering', 'Solution Design', 'Solutions Draft S
 // table (its status is fixed), so those filters still narrow it by PSE/KAM/etc.
 function applyTatFilters(list, { useStatus = true } = {}) {
   const f = STATE.tatFilters;
+  const search = f.search.trim().toLowerCase();
   return list.filter((i) => {
     if (f.pse.size && !f.pse.has(i.assignee)) return false;
     if (useStatus && f.status.size && !f.status.has(i.status)) return false;
@@ -1358,12 +1441,16 @@ function applyTatFilters(list, { useStatus = true } = {}) {
     if (f.salesRep.size && !f.salesRep.has(i.salesRep)) return false;
     if (f.dealSize && i.dealSize !== f.dealSize) return false;
     if (f.health.size && !f.health.has(tatHealth(i.tatDays))) return false;
+    if (search) {
+      const hay = `${i.key} ${i.summary || ''} ${i.assignee || ''} ${i.kam || ''} ${i.salesRep || ''}`.toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
     return true;
   });
 }
 
 function fmtTatDate(d) {
-  return d ? new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) : '<span class="tat-blank">—</span>';
+  return fmtDdMmYyyy(d) || '<span class="tat-blank">—</span>';
 }
 
 // Column model shared by all three TAT tables; each column is independently
@@ -1530,7 +1617,7 @@ function renderTat() {
 function renderTatSidebar() {
   if (!STATE.facc) loadSidebarPrefs();
   const f = STATE.tatFilters;
-  const activeCount = f.pse.size + f.status.size + f.health.size + f.kam.size + f.salesRep.size + (f.dealSize ? 1 : 0);
+  const activeCount = f.pse.size + f.status.size + f.health.size + f.kam.size + f.salesRep.size + (f.dealSize ? 1 : 0) + (f.search.trim() ? 1 : 0);
   const sb = document.getElementById('sidebar');
   sb.style.display = '';
   sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
@@ -1605,7 +1692,7 @@ function renderTatSidebar() {
   });
 
   document.getElementById('clearTatFiltersBtn').addEventListener('click', () => {
-    STATE.tatFilters = { pse: new Set(), status: new Set(), health: new Set(), kam: new Set(), salesRep: new Set(), dealSize: '' };
+    STATE.tatFilters = { pse: new Set(), status: new Set(), health: new Set(), kam: new Set(), salesRep: new Set(), dealSize: '', search: '' };
     STATE.tatBox = 'all';
     STATE.tatSort = {};
     renderTat();
@@ -1649,9 +1736,14 @@ const closeDateOf = (c) => c.commercialSignOffDate || null;
 
 function applyWinFilters(cards) {
   const f = STATE.winFilters;
+  const search = f.search.trim().toLowerCase();
   return cards.filter((c) => {
     if (f.pse.size && !f.pse.has(winPse(c))) return false;
     if (f.status.size && !f.status.has(c.status)) return false;
+    if (search) {
+      const hay = `${c.key} ${c.summary || ''} ${winPse(c)} ${c.kam || ''} ${c.salesRep || ''}`.toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
     return true;
   });
 }
@@ -1678,8 +1770,8 @@ function winRow(c) {
       <td>${wonLabel(c.status)}</td>
       <td class="win-num">${c.mrr ? fmtUsd(c.mrr) : '<span class="tat-blank">—</span>'}</td>
       <td class="win-num">${arr ? fmtUsd(arr) : '<span class="tat-blank">—</span>'}</td>
-      <td>${c.commercialSignOffDate ? new Date(c.commercialSignOffDate + 'T00:00:00').toLocaleDateString('en-GB') : '<span class="tat-blank">— not set —</span>'}</td>
-      <td>${c.sowSignOffDate ? new Date(c.sowSignOffDate + 'T00:00:00').toLocaleDateString('en-GB') : '<span class="tat-blank">—</span>'}</td>
+      <td>${fmtDdMmYyyy(c.commercialSignOffDate) || '<span class="tat-blank">— not set —</span>'}</td>
+      <td>${fmtDdMmYyyy(c.sowSignOffDate) || '<span class="tat-blank">—</span>'}</td>
     </tr>`;
 }
 
@@ -1859,7 +1951,7 @@ function openWinDetail(key, source) {
   const c = (source || STATE.winCards || []).find((x) => x.key === key);
   if (!c) return;
   const field = (l, v) => `<div><div class="mf-l">${l}</div><div class="mf-v">${v ?? '—'}</div></div>`;
-  const d = (x) => (x ? new Date(x + 'T00:00:00').toLocaleDateString('en-GB') : '—');
+  const d = (x) => fmtDdMmYyyy(x) || '—';
   document.getElementById('modalContent').innerHTML = `
     <div class="modal-head">
       <div><div class="modal-key">${c.key}</div><div class="modal-title">${c.summary || ''}</div></div>
@@ -1891,7 +1983,7 @@ function renderTeamSidebar() {
   const cards = STATE.winCards || [];
   const pses = distinct(cards.map(winPse));
   const statuses = distinct(cards.map((c) => c.status));
-  const activeCount = f.pse.size + f.status.size;
+  const activeCount = f.pse.size + f.status.size + (f.search.trim() ? 1 : 0);
   const sb = document.getElementById('sidebar');
   sb.style.display = '';
   sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
@@ -1930,7 +2022,7 @@ function renderTeamSidebar() {
     });
   });
   document.getElementById('clearWinFiltersBtn').addEventListener('click', () => {
-    STATE.winFilters = { pse: new Set(), status: new Set() };
+    STATE.winFilters = { pse: new Set(), status: new Set(), search: '' };
     renderTeamView();
   });
 }
@@ -1981,7 +2073,7 @@ function renderActivity() {
               <div class="tl-dot"></div>
               <div class="tl-body">
                 <div class="tl-desc">${describeActivity(a)} — <span class="tl-key" data-key="${a.key}">${a.key}</span> <span style="color:var(--t3)">${a.summary || ''}</span></div>
-                <div class="tl-meta">${a.author || 'Unknown'} · ${new Date(a.created).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST</div>
+                <div class="tl-meta">${a.author || 'Unknown'} · ${fmtDdMmYyyyTime(a.created)} IST</div>
               </div>
             </div>`
               )
@@ -2302,6 +2394,22 @@ async function renderTracker() {
   renderTrackerView();
 }
 
+// A native <input type="date"> renders its closed-state text in whatever
+// locale the BROWSER is set to, not the page's — the `lang` attribute is
+// honored by Firefox but ignored by Chrome/Edge, so on a US-locale browser
+// it shows MM/DD/YYYY no matter what we put in the HTML. To guarantee
+// DD/MM/YYYY everywhere regardless of the viewer's browser, the native input
+// is kept (so the calendar picker + underlying ISO value/save logic are
+// unchanged) but visually hidden behind a readonly text field that always
+// displays the date via fmtDdMmYyyy; clicking the text opens the native
+// picker via showPicker().
+function trackerDateFieldHtml(field, isoValue, title) {
+  return `<div class="tk-date-wrap">
+    <input type="text" class="tk-input tk-date-text" readonly value="${fmtDdMmYyyy(isoValue) || ''}" placeholder="DD/MM/YYYY" title="${title}"/>
+    <input type="date" class="tk-input tk-date-native" data-field="${field}" value="${isoValue || ''}" tabindex="-1" aria-hidden="true"/>
+  </div>`;
+}
+
 function trackerRow(t, day, { hideFlagCol = false } = {}) {
   const overdue = taskOverdue(t, day);
   const rowCls = overdue ? 'row-flagged' : '';
@@ -2315,14 +2423,14 @@ function trackerRow(t, day, { hideFlagCol = false } = {}) {
   return `
     <tr data-id="${t.id}" class="${rowCls}">
       <td class="tk-cell tk-cell-name"><textarea class="tk-input tk-textarea" data-field="dealName" rows="1" placeholder="Task name…">${escapeHtml(t.dealName || '')}</textarea></td>
-      <td class="tk-cell tk-cell-date tk-cell-planned" title="Planned On — the day this task was actually added, fixed forever">${t.createdDate ? new Date(t.createdDate + 'T00:00:00').toLocaleDateString('en-GB') : '—'}</td>
-      <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" lang="en-GB" data-field="taskStartDate" value="${taskStart(t) || ''}" title="Task Start Date — the task appears from this day onward; change it to move the task to another day"/></td>
+      <td class="tk-cell tk-cell-date tk-cell-planned" title="Planned On — the day this task was actually added, fixed forever">${fmtDdMmYyyy(t.createdDate) || '—'}</td>
+      <td class="tk-cell tk-cell-date">${trackerDateFieldHtml('taskStartDate', taskStart(t), 'Task Start Date — the task appears from this day onward; change it to move the task to another day')}</td>
       <td class="tk-cell">
         <select class="tk-select tk-select-status ${statusCls}" data-field="status">
           ${['Planned', 'In Progress', 'Done'].map((s) => `<option value="${s}" ${statusVal === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
       </td>
-      <td class="tk-cell tk-cell-date"><input class="tk-input" type="date" lang="en-GB" data-field="dueDate" value="${t.dueDate || ''}" title="Due date (editable)"/></td>
+      <td class="tk-cell tk-cell-date">${trackerDateFieldHtml('dueDate', t.dueDate, 'Due date (editable)')}</td>
       ${hideFlagCol ? '' : `<td class="tk-cell">
         <select class="tk-select tk-select-yn ${t.flagApoorv ? 'yn-yes' : 'yn-no'}" data-field="flagApoorv">
           <option value="false" ${!t.flagApoorv ? 'selected' : ''}>No</option>
@@ -2355,7 +2463,7 @@ function flaggedRow(t) {
     <tr data-id="${t.id}" class="tk-flag-row ${rowStateCls}">
       <td class="tk-cell tk-cell-name"><span class="tk-flag-taskname">${escapeHtml(t.dealName || '(unnamed task)')}</span></td>
       <td class="tk-cell"><span class="tk-flag-raiser">${t.pse}</span></td>
-      <td class="tk-cell"><span class="tk-flag-startdate">${new Date(taskStart(t) + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span></td>
+      <td class="tk-cell"><span class="tk-flag-startdate">${fmtDdMmYyyy(taskStart(t))}</span></td>
       <td class="tk-cell"><textarea class="tk-input tk-textarea" data-field="remarks" rows="1" placeholder="Remarks…">${escapeHtml(t.remarks || '')}</textarea></td>
       <td class="tk-cell tk-cell-seen">
         <label class="tk-seen-toggle ${t.apoorvSeen ? 'checked' : ''}" title="Mark as seen by Apoorv">
@@ -2383,6 +2491,11 @@ function trackerRowMatchesFilters(t) {
   if (f.status.size && !f.status.has(status)) return false;
   if (f.helpInSow && String(!!t.helpInSow) !== f.helpInSow) return false;
   if (f.flagApoorv && String(!!t.flagApoorv) !== f.flagApoorv) return false;
+  const search = f.dealName.trim().toLowerCase();
+  if (search) {
+    const hay = `${t.dealName || ''} ${t.remarks || ''} ${t.blocker || ''}`.toLowerCase();
+    if (!hay.includes(search)) return false;
+  }
   return true;
 }
 
@@ -2801,6 +2914,23 @@ function bindTrackerEvents() {
       saveTrackerField(id, field, value, immediate);
     });
   });
+
+  bindTrackerDateFields();
+}
+
+// The DD/MM/YYYY text is a readonly display sitting over a hidden native
+// date input (see trackerDateFieldHtml) — clicking it opens that input's own
+// calendar picker rather than letting the browser's locale-dependent text
+// rendering show through.
+function bindTrackerDateFields() {
+  document.querySelectorAll('.tk-date-text').forEach((txt) => {
+    txt.addEventListener('click', () => {
+      const native = txt.nextElementSibling;
+      if (!native) return;
+      if (native.showPicker) native.showPicker();
+      else native.focus();
+    });
+  });
 }
 
 // Exclusive left-sidebar filters for the Daily Tracker tab: PSE, Status,
@@ -2809,7 +2939,7 @@ function bindTrackerEvents() {
 function renderTrackerSidebar() {
   if (!STATE.facc) loadSidebarPrefs();
   const f = STATE.trackerFilters;
-  const activeCount = f.pse.size + f.status.size + (f.helpInSow ? 1 : 0) + (f.flagApoorv ? 1 : 0) + (f.dateFrom ? 1 : 0) + (f.dateTo ? 1 : 0);
+  const activeCount = f.pse.size + f.status.size + (f.helpInSow ? 1 : 0) + (f.flagApoorv ? 1 : 0) + (f.dateFrom ? 1 : 0) + (f.dateTo ? 1 : 0) + (f.dealName.trim() ? 1 : 0);
   const sb = document.getElementById('sidebar');
   sb.style.display = '';
   sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
@@ -2893,7 +3023,7 @@ function renderTrackerSidebar() {
   });
 
   document.getElementById('clearTrackerFiltersBtn').addEventListener('click', () => {
-    STATE.trackerFilters = { pse: new Set(), status: new Set(), helpInSow: '', flagApoorv: '', dateFrom: '', dateTo: '' };
+    STATE.trackerFilters = { pse: new Set(), status: new Set(), helpInSow: '', flagApoorv: '', dateFrom: '', dateTo: '', dealName: '' };
     renderTrackerView();
   });
 }
@@ -3085,7 +3215,11 @@ function renderQuickLinksView() {
       ${STATE.quickLinksCreatingGroup ? createGroupFormHtml() : ''}
       ${visibleGroups
         .map((group) => {
-          const groupLinks = groups[group];
+          const search = STATE.quickLinksSearch.trim().toLowerCase();
+          const groupLinks = search
+            ? groups[group].filter((l) => `${l.name} ${l.url}`.toLowerCase().includes(search))
+            : groups[group];
+          if (search && !groupLinks.length) return '';
           const highlighted = group !== 'Links'; // named groups (e.g. "Solutions Team Decks") stand out
           const adding = STATE.quickLinksAddingGroup === group;
           return `
@@ -3138,7 +3272,7 @@ function renderQuickLinksView() {
           </div>
         </div>`;
         })
-        .join('')}
+        .join('') || `<div class="empty">No links match "${escapeAttr(STATE.quickLinksSearch.trim())}"</div>`}
     </div>`;
 
   bindCreateGroupHandlers();
@@ -3441,7 +3575,7 @@ function ucCellContent(card, col) {
     return `<span title="${escapeAttr(v.text || '')}">${escapeHtml((v.text || '').slice(0, 40))}</span>`;
   }
   if (col.type === 'num') return col.key === 'mrr' ? fmtUsd(v) : v;
-  if (col.type === 'date') return new Date(v + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+  if (col.type === 'date') return fmtDdMmYyyy(v);
   return escapeHtml(String(v));
 }
 
@@ -3452,6 +3586,7 @@ function ucVisibleSections() {
 
 function applyUpdateFilters(cards) {
   const f = STATE.updateFilters;
+  const search = f.search.trim().toLowerCase();
   return cards.filter((c) => {
     if (f.pse.size && !f.pse.has(c.assignee)) return false;
     if (f.status.size && !f.status.has(c.status)) return false;
@@ -3464,6 +3599,10 @@ function applyUpdateFilters(cards) {
     if (f.missingField) {
       const col = UC_ALL_COLS.find((x) => x.key === f.missingField);
       if (col && !ucIsBlank(c[col.key], col.type)) return false;
+    }
+    if (search) {
+      const hay = `${c.key} ${c.summary || ''} ${c.assignee || ''} ${c.kam || ''} ${c.salesRep || ''}`.toLowerCase();
+      if (!hay.includes(search)) return false;
     }
     return true;
   });
@@ -3692,7 +3831,7 @@ function renderUpdateCheckSidebar() {
   const cards = STATE.updateCards;
   const opt = (key) => distinct(cards.map((c) => c[key]));
   const activeCount = f.pse.size + f.status.size + f.kam.size + f.salesRep.size + f.requestCategory.size +
-    (f.completeness !== 'all' ? 1 : 0) + f.sections.size + (f.missingField ? 1 : 0);
+    (f.completeness !== 'all' ? 1 : 0) + f.sections.size + (f.missingField ? 1 : 0) + (f.search.trim() ? 1 : 0);
   const sb = document.getElementById('sidebar');
   sb.style.display = '';
   sb.classList.toggle('collapsed', STATE.sidebarCollapsed);
@@ -3763,7 +3902,7 @@ function renderUpdateCheckSidebar() {
     });
   });
   document.getElementById('clearUcFiltersBtn').addEventListener('click', () => {
-    STATE.updateFilters = { pse: new Set(), status: new Set(), kam: new Set(), salesRep: new Set(), requestCategory: new Set(), completeness: 'all', sections: new Set(), missingField: '' };
+    STATE.updateFilters = { pse: new Set(), status: new Set(), kam: new Set(), salesRep: new Set(), requestCategory: new Set(), completeness: 'all', sections: new Set(), missingField: '', search: '' };
     renderUpdateCheckView();
   });
 }
@@ -3781,7 +3920,7 @@ function openCardModal(key) {
         <div class="tl-dot"></div>
         <div class="tl-body">
           <div class="tl-desc">${describeActivity(h)}</div>
-          <div class="tl-meta">${h.author || 'Unknown'} · ${new Date(h.created).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST</div>
+          <div class="tl-meta">${h.author || 'Unknown'} · ${fmtDdMmYyyyTime(h.created)} IST</div>
         </div>
       </div>`
     )
@@ -3811,13 +3950,13 @@ function openCardModal(key) {
         ${field('Deal Size', dealSizeBadge(issue.dealSize))}
         ${field('Shipment Volume / Month', issue.shipmentVolume)}
         ${field('Expected Closure (weeks)', issue.expectedClosureWeeks)}
-        ${field('Expected Sales Closure', issue.expectedSalesClosure)}
-        ${field('Solutioning Start Date', issue.solutioningStartDate)}
-        ${field('SoW Send Date', issue.sowSendDate)}
-        ${field('SoW Confirmation Date', issue.sowConfirmationDate)}
+        ${field('Expected Sales Closure', fmtDdMmYyyy(issue.expectedSalesClosure))}
+        ${field('Solutioning Start Date', fmtDdMmYyyy(issue.solutioningStartDate))}
+        ${field('SoW Send Date', fmtDdMmYyyy(issue.sowSendDate))}
+        ${field('SoW Confirmation Date', fmtDdMmYyyy(issue.sowConfirmationDate))}
         ${field('TAT', tatLabel(issue) + (issue.tatHoldDays ? ` <span style="color:var(--t3);font-size:11px">(excl. ${issue.tatHoldDays}d client hold)</span>` : ''))}
-        ${field('Created', new Date(issue.created).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }))}
-        ${field('Last Updated', new Date(issue.updated).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }))}
+        ${field('Created', fmtDdMmYyyyTime(issue.created))}
+        ${field('Last Updated', fmtDdMmYyyyTime(issue.updated))}
       </div>
       <a class="jira-link" href="${issue.url}" target="_blank" rel="noopener">Open in Jira →</a>
       <div class="sh" style="margin-top:20px"><div class="sht">Activity on this card</div><div class="shl"></div></div>
@@ -3899,25 +4038,70 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === '>' || e.key === '.') { e.preventDefault(); switchTab(1); }
 });
 
-// Global search — present on every tab (outside #app/#sidebar so it survives
-// every re-render), jumps straight to a filtered list of matching deals/cards.
+// Search — present on every tab (outside #app/#sidebar so it survives every
+// re-render), but scoped to whichever tab is currently open: it writes into
+// that tab's own filter bucket and re-renders in place, rather than jumping
+// to an unrelated cross-tab result list.
+const SIDEBAR_SEARCH_ROUTES = ['pipeline', 'mrr', 'closing', 'c3m'];
+function runTabSearch(q) {
+  const route = STATE.route.name;
+  if (SIDEBAR_SEARCH_ROUTES.includes(route)) {
+    STATE.filters.search = q;
+    render();
+    return applyFilters(STATE.data.issues).length;
+  }
+  if (route === 'overview' || ['status', 'segment', 'list'].includes(route)) {
+    STATE.ovFilters.search = q;
+    renderOverviewView();
+    return applyOvFilters(STATE.overviewCards || []).length;
+  }
+  if (route === 'team') {
+    STATE.winFilters.search = q;
+    renderTeamView();
+    return applyWinFilters(STATE.winCards || []).length;
+  }
+  if (route === 'tat') {
+    STATE.tatFilters.search = q;
+    renderTat();
+    return applyTatFilters(STATE.data.issues).length;
+  }
+  if (route === 'update') {
+    STATE.updateFilters.search = q;
+    renderUpdateCheckView();
+    return applyUpdateFilters(STATE.updateCards || []).length;
+  }
+  if (route === 'tracker') {
+    STATE.trackerFilters.dealName = q;
+    renderTrackerView();
+    return (STATE.trackerTasks || []).filter(trackerRowMatchesFilters).length;
+  }
+  if (route === 'links') {
+    STATE.quickLinksSearch = q;
+    renderQuickLinksView();
+    return null; // rendered inline, no separate count needed
+  }
+  if (route === 'activity') {
+    STATE.activityFilters.dealName = q;
+    renderActivity();
+    return null; // rendered inline, no separate count needed
+  }
+  return null;
+}
+
 document.getElementById('globalSearchForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = document.getElementById('globalSearchInput');
-  const q = input.value.trim().toLowerCase();
+  const q = input.value.trim();
   const hint = document.getElementById('globalSearchHint');
-  if (!q) return;
-  const matches = (STATE.data.issues || []).filter((i) =>
-    `${i.key} ${i.summary || ''} ${i.assignee || ''} ${i.kam || ''} ${i.salesRep || ''}`.toLowerCase().includes(q)
-  );
-  if (!matches.length) {
-    hint.textContent = `No deals or cards match "${input.value.trim()}"`;
+  const count = runTabSearch(q);
+  if (!q) {
+    hint.classList.remove('show');
+  } else if (count === 0) {
+    hint.textContent = `No matches for "${q}" on this tab`;
     hint.classList.add('show');
-    return;
+  } else {
+    hint.classList.remove('show');
   }
-  hint.classList.remove('show');
-  const matchKeys = new Set(matches.map((i) => i.key));
-  goToFilteredList(`Search results for "${input.value.trim()}"`, (i) => matchKeys.has(i.key), { raw: true });
 });
 
 document.getElementById('refreshBtn').addEventListener('click', async () => {

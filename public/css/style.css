@@ -367,6 +367,9 @@ tr.row-early:hover td{background:#D6F5E3 !important;}
 .tk-table td.tk-cell{padding:8px 12px;vertical-align:top;}
 .tk-table th{padding:12px 12px;}
 .tk-table .tk-input,.tk-table .tk-select{font-size:13px;padding:11px 12px;line-height:1.5;min-height:44px;}
+.tk-date-wrap{position:relative;}
+.tk-date-text{cursor:pointer;}
+.tk-table .tk-date-native,.tk-date-native{position:absolute;left:0;top:0;width:1px;height:1px;min-height:0;opacity:0;pointer-events:none;padding:0;border:none;}
 .tk-table .tk-cell-name{min-width:360px;}
 .tk-table .tk-cell-name .tk-textarea{min-width:340px;font-weight:600;}
 /* Task Name & Blocker are wrapping text areas that grow with content, so long
