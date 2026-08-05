@@ -4,7 +4,11 @@
 // the only layer that can also gate the static HTML/JS/CSS files, since
 // those are served directly from the CDN rather than through a function.
 export const config = {
-  matcher: ['/((?!login.html|api/auth|favicon.ico).*)'],
+  // api/fireflies-webhook authenticates via HMAC signature and
+  // api/cron/fireflies-retry via Vercel's CRON_SECRET bearer token —
+  // both server-to-server, not a session cookie, so both are excluded from
+  // this gate just like api/auth.
+  matcher: ['/((?!login.html|api/auth|api/fireflies-webhook|api/cron/fireflies-retry|favicon.ico).*)'],
 };
 
 const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;

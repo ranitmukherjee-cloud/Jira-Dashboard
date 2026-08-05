@@ -2,6 +2,11 @@
   "outputDirectory": "public",
   "functions": {
     "api/data.js": { "maxDuration": 60 },
-    "api/refresh.js": { "maxDuration": 60 }
-  }
+    "api/refresh.js": { "maxDuration": 60 },
+    "api/fireflies-webhook.js": { "maxDuration": 30 },
+    "api/cron/fireflies-retry.js": { "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/cron/fireflies-retry", "schedule": "0 3 * * *" }
+  ]
 }

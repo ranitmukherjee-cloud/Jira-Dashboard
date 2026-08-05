@@ -5,7 +5,8 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { getLiveData } = require('./lib/live');
-const { UPDATE_CHECK_STATUSES, WON_STATUSES, OVERVIEW_STATUSES } = require('./lib/jira');
+const { UPDATE_CHECK_STATUSES, WON_STATUSES, OVERVIEW_STATUSES, getConfig: getJiraConfig } = require('./lib/jira');
+const { verifySignature, handleTranscriptionCompleted, queuePendingMeeting, retryPendingMeetings } = require('./lib/fireflies');
 const SET_STATUSES = { won: WON_STATUSES, overview: OVERVIEW_STATUSES };
 const { listTasks, createTask, updateTask, deleteTask, listLeave, setLeaveStatus, listHolidays, setHolidayStatus } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
@@ -23,7 +24,10 @@ const {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+// verify captures the exact raw bytes alongside the parsed body, needed to
+// check the Fireflies webhook's HMAC signature (which is computed over the
+// raw request, not our re-serialized copy of it).
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
 function getCookie(req, name) {
   const cookie = req.headers.cookie || '';
@@ -34,7 +38,9 @@ function getCookie(req, name) {
 // Login gate — mirrors middleware.js on Vercel. Runs before static files and
 // every API route except the login page itself and the auth endpoint.
 app.use(async (req, res, next) => {
-  if (req.path === '/login.html' || req.path === '/api/auth') return next();
+  // The Fireflies webhook authenticates via HMAC signature, not a session
+  // cookie — it's a server-to-server call, not a browser visit.
+  if (req.path === '/login.html' || req.path === '/api/auth' || req.path === '/api/fireflies-webhook') return next();
   const valid = await isValidSession(getCookie(req, 'session'));
   if (valid) return next();
   if (req.path.startsWith('/api/')) {
@@ -108,6 +114,68 @@ app.post('/api/refresh', async (req, res) => {
 });
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+// Fireflies webhook: fires when a meeting's transcript finishes processing.
+// We verify the HMAC signature, then pull the summary + full transcript and
+// post them as comments on the PSV card named in the meeting title.
+app.post('/api/fireflies-webhook', async (req, res) => {
+  const secret = process.env.FIREFLIES_WEBHOOK_SECRET;
+  if (!secret) {
+    res.status(500).json({ error: 'FIREFLIES_WEBHOOK_SECRET not configured' });
+    return;
+  }
+  if (!verifySignature(req.rawBody, req.headers['x-hub-signature'], secret)) {
+    res.status(401).json({ error: 'Invalid signature' });
+    return;
+  }
+
+  const payload = req.body || {};
+  if (payload.eventType !== 'Transcription completed') {
+    res.status(200).json({ ok: true, skipped: true, reason: 'ignored event type' });
+    return;
+  }
+
+  const apiKey = process.env.FIREFLIES_API_KEY;
+  if (!apiKey) {
+    res.status(500).json({ error: 'FIREFLIES_API_KEY not configured' });
+    return;
+  }
+
+  try {
+    const jiraCfg = getJiraConfig();
+    const result = await handleTranscriptionCompleted({
+      meetingId: payload.meetingId,
+      jiraCfg,
+      projectKey: jiraCfg.projectKey,
+      apiKey,
+    });
+    if (result.skipped && result.reason === 'no Jira key found in meeting title') {
+      await queuePendingMeeting(payload.meetingId, result.title);
+    }
+    res.status(200).json(result);
+  } catch (err) {
+    console.error('Fireflies webhook failed:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Local-dev equivalent of the Vercel retry cron (see api/cron/fireflies-retry.js)
+// — Vercel's own cron scheduling doesn't apply when running this server
+// yourself, so this re-checks the pending queue on the same cadence directly.
+if (process.env.FIREFLIES_API_KEY) {
+  const RETRY_INTERVAL_MS = 60 * 60 * 1000; // hourly; no Vercel plan limits apply locally
+  setInterval(async () => {
+    try {
+      const jiraCfg = getJiraConfig();
+      const result = await retryPendingMeetings({ jiraCfg, projectKey: jiraCfg.projectKey, apiKey: process.env.FIREFLIES_API_KEY });
+      if (result.matched.length || result.expired.length) {
+        console.log('Fireflies retry:', result);
+      }
+    } catch (err) {
+      console.error('Fireflies retry failed:', err.message);
+    }
+  }, RETRY_INTERVAL_MS);
+}
 
 // Daily Task Tracker — manually entered, shared, persistent (not from Jira).
 app.get('/api/tracker', async (req, res) => {

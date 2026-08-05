@@ -24,6 +24,27 @@ Dynamic dashboard for GoComet's Product Solutions team, sourced live from the Ji
 
 There is **no database and no scheduled job** — nothing to provision, nothing to keep in sync. The trade-off is that day-over-day trend charts (which would need persisted daily snapshots) are not available.
 
+## Fireflies meeting sync
+
+`api/fireflies-webhook.js` (and the matching `/api/fireflies-webhook` route in `server.js`) auto-posts a meeting's Fireflies summary onto the PSV card the meeting was for, whenever Fireflies finishes transcribing a call. The full transcript is uploaded as a file attachment on the issue (named e.g. `PSV-1234 - Sync with Acme on 05-08-2026.txt`) rather than pasted into a comment, and the summary comment links to it — so a card with many calls gets one short comment per call instead of a wall of transcript text.
+
+**How a meeting is matched to a card:** by the PSV issue key appearing in the meeting title — e.g. a calendar event / Fireflies meeting named `PSV-1234 — Sync with Acme` gets its summary comment (and transcript attachment) posted to `PSV-1234`. Meetings whose title has no PSV key are queued for retry (see below), not dropped. This means whoever schedules the call needs to put the card key in the meeting title.
+
+**One-time setup:**
+
+1. **Fireflies API key** — in the Fireflies web app, go to Integrations → Fireflies API and generate a key (requires API access on your Fireflies plan). Set it as `FIREFLIES_API_KEY`.
+2. **Webhook secret** — pick any random 16–32 character string yourself. Set it as `FIREFLIES_WEBHOOK_SECRET` in this app's env vars, *and* in Fireflies' webhook settings (step 3) — both sides must have the same value, it's used to verify the webhook really came from Fireflies.
+3. **Register the webhook** — in Fireflies, go to Settings → Developer Settings, and set the webhook URL to `https://<your-deployed-domain>/api/fireflies-webhook`, with the secret from step 2.
+4. Add both env vars (`FIREFLIES_API_KEY`, `FIREFLIES_WEBHOOK_SECRET`) to `.env` for local dev, and to the Vercel project's environment variables for production.
+
+**Notes:**
+- The webhook is intentionally excluded from the dashboard's session-cookie login gate (see `middleware.js` / `server.js`) since it's a server-to-server call from Fireflies, authenticated by the HMAC signature instead.
+- Retried/duplicate webhook deliveries are handled by checking for an existing comment tagged with the same Fireflies meeting id before posting again. If the attachment upload succeeds but the comment post then fails, a retry re-uploads the transcript rather than reusing the first upload — a harmless duplicate attachment in that rare case, not a duplicate comment.
+- If the transcript attachment upload fails for any reason, the summary comment still posts (without a transcript link) rather than losing the summary too.
+- **No PSV key in the title yet?** It's queued (`lib/firefliesStore.js`, Redis/local-file backed like the Task Tracker) instead of dropped. `api/cron/fireflies-retry.js` rechecks every queued meeting's *current* title — Fireflies has no "title changed" webhook, so this is what catches someone adding the key to the title after the fact. Anything still unmatched after 48h is dropped from the queue; from there it's manual copy-paste into the Jira comment box, same as any meeting that never gets a key at all.
+- **Vercel Cron note:** the Hobby plan only allows cron jobs to run once a day (`vercel.json` defaults to `0 3 * * *`, 3am UTC), so a late title-rename might take up to a day to get picked up. If you're on a Pro plan, tighten that schedule (e.g. hourly, `0 * * * *`) for faster pickup — the 48h queue window comfortably supports it either way. Running `server.js` locally isn't subject to this limit at all; it re-checks the queue hourly on its own via `setInterval`.
+- Set `CRON_SECRET` (any random string) so `api/cron/fireflies-retry` only responds to Vercel's own scheduler, not a public GET request.
+
 ## Run locally
 
 1. `npm install`
