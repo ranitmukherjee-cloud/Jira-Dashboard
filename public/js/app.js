@@ -3068,7 +3068,7 @@ async function renderQuickLinks() {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       }),
-      fetch('/api/quicklinks/groups', { cache: 'no-store' }).then((r) => {
+      fetch('/api/quicklinks?resource=groups', { cache: 'no-store' }).then((r) => {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       }),
@@ -3144,7 +3144,7 @@ function bindCreateGroupHandlers() {
       if (!name) return;
       saveBtn.disabled = true;
       try {
-        const res = await fetch('/api/quicklinks/groups', {
+        const res = await fetch('/api/quicklinks?resource=groups', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name }),
@@ -3328,7 +3328,7 @@ function renderQuickLinksView() {
       }
       clearTimeout(STATE.confirmDeleteTimer);
       STATE.confirmDeleteId = null;
-      await fetch(`/api/quicklinks/${id}`, { method: 'DELETE' });
+      await fetch(`/api/quicklinks?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       STATE.quickLinks = STATE.quickLinks.filter((l) => l.id !== id);
       renderQuickLinksView();
     });
@@ -3358,7 +3358,7 @@ function renderQuickLinksView() {
         return;
       }
       try {
-        const res = await fetch(`/api/quicklinks/groups/${encodeURIComponent(oldName)}`, {
+        const res = await fetch(`/api/quicklinks?resource=groups&name=${encodeURIComponent(oldName)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: newName }),
@@ -3398,7 +3398,7 @@ function renderQuickLinksView() {
       }
       clearTimeout(STATE.confirmDeleteGroupTimer);
       STATE.confirmDeleteGroupId = null;
-      await fetch(`/api/quicklinks/groups/${encodeURIComponent(group)}`, { method: 'DELETE' });
+      await fetch(`/api/quicklinks?resource=groups&name=${encodeURIComponent(group)}`, { method: 'DELETE' });
       STATE.quickLinksGroups = (STATE.quickLinksGroups || []).filter((g) => g !== group);
       STATE.quickLinks = STATE.quickLinks.filter((l) => l.group !== group);
       if (STATE.quickLinksFilter === group) STATE.quickLinksFilter = 'all';
@@ -3517,7 +3517,7 @@ function bindLinkDragDrop() {
       });
 
       renderQuickLinksView(); // optimistic re-render before the network round-trip
-      await fetch('/api/quicklinks/reorder', {
+      await fetch('/api/quicklinks?resource=reorder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ group, ids: orderedIds }),

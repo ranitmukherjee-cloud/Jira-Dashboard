@@ -10,7 +10,7 @@ const { verifySignature, handleTranscriptionCompleted, queuePendingMeeting, retr
 const SET_STATUSES = { won: WON_STATUSES, overview: OVERVIEW_STATUSES };
 const { listTasks, createTask, updateTask, deleteTask, listLeave, setLeaveStatus, listHolidays, setHolidayStatus } = require('./lib/tracker');
 const { USE_REDIS, initError } = require('./lib/trackerStore');
-const { listLinks, addLink, updateLink, reorderLinks, deleteLink, listGroups, createGroup, renameGroup, deleteGroup } = require('./lib/quickLinks');
+const quickLinksHandler = require('./api/quicklinks');
 const {
   createSession,
   isValidSession,
@@ -235,63 +235,9 @@ app.delete('/api/tracker/:id', async (req, res) => {
 });
 
 // Quick Links — user-added, shared, persistent (not from Jira).
-app.get('/api/quicklinks', async (req, res) => {
-  res.json(await listLinks());
-});
-app.post('/api/quicklinks', async (req, res) => {
-  try {
-    res.status(201).json(await addLink(req.body || {}));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-app.patch('/api/quicklinks/:id', async (req, res) => {
-  try {
-    res.json(await updateLink(req.params.id, req.body || {}));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-app.post('/api/quicklinks/reorder', async (req, res) => {
-  try {
-    const { group, ids } = req.body || {};
-    if (!group || !Array.isArray(ids)) throw new Error('group and ids[] are required');
-    res.json(await reorderLinks(group, ids));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-app.delete('/api/quicklinks/:id', async (req, res) => {
-  try {
-    res.json(await deleteLink(req.params.id));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-app.get('/api/quicklinks/groups', async (req, res) => {
-  res.json(await listGroups());
-});
-app.post('/api/quicklinks/groups', async (req, res) => {
-  try {
-    res.status(201).json(await createGroup((req.body || {}).name));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-app.patch('/api/quicklinks/groups/:name', async (req, res) => {
-  try {
-    res.json(await renameGroup(req.params.name, (req.body || {}).name));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-app.delete('/api/quicklinks/groups/:name', async (req, res) => {
-  try {
-    res.json(await deleteGroup(req.params.name));
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
+// Delegates to the very same handler Vercel runs in production (one function,
+// dispatching on ?resource=), so local and deployed behaviour can't drift.
+app.all('/api/quicklinks', quickLinksHandler);
 
 app.listen(PORT, () => {
   console.log(`PSV dashboard running at http://localhost:${PORT}`);
