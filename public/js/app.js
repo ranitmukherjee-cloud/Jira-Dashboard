@@ -1385,7 +1385,7 @@ function renderClosingSoon() {
         <div class="th"><span class="tht">Cards</span><span class="ths">Sorted by soonest closure date</span></div>
         <div class="tw">
           <table>
-            <thead><tr><th>Key</th><th>Client / Card</th><th>Status</th><th>PSE</th><th>KAM</th><th>MRR</th><th>Closure Date</th><th>Days Left</th></tr></thead>
+            <thead><tr><th>Key</th><th>Client / Card</th><th>Status</th><th>PSE</th><th>KAM</th><th>Sales Rep</th><th>MRR</th><th>Closure Date</th><th>SOW Sign-Off</th><th>Days Left</th></tr></thead>
             <tbody>
               ${
                 rows
@@ -1397,12 +1397,14 @@ function renderClosingSoon() {
                   <td>${fbadge(i.status)}</td>
                   <td>${i.assignee}</td>
                   <td>${i.kam || '—'}</td>
+                  <td>${i.salesRep || '—'}</td>
                   <td>${fmtUsd(i.mrr)}</td>
                   <td>${fmtDdMmYyyy(i.expectedSalesClosure)}</td>
+                  <td>${fmtDdMmYyyy(i.sowSignOffDate) || '—'}</td>
                   <td><span class="bd ${i.daysUntil <= 7 ? 'br' : i.daysUntil <= 15 ? 'ba' : 'bb'}">${i.daysUntil}d</span></td>
                 </tr>`
                   )
-                  .join('') || '<tr><td colspan="8" class="empty">No deals closing in the next 30 days</td></tr>'
+                  .join('') || '<tr><td colspan="10" class="empty">No deals closing in the next 30 days</td></tr>'
               }
             </tbody>
           </table>
@@ -1418,8 +1420,10 @@ function renderClosingSoon() {
       { label: 'Status', value: (r) => r.status },
       { label: 'PSE', value: (r) => r.assignee },
       { label: 'KAM', value: (r) => r.kam },
+      { label: 'Sales Rep', value: (r) => r.salesRep },
       { label: 'MRR', value: (r) => r.mrr },
       { label: 'Closure Date', value: (r) => r.expectedSalesClosure },
+      { label: 'SOW Sign-Off', value: (r) => r.sowSignOffDate },
       { label: 'Days Left', value: (r) => r.daysUntil },
     ]));
   });
